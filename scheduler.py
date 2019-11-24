@@ -23,7 +23,7 @@ class Job:
         The given scheduler object can be used to interact with the
         surrounding job running machinery.
         """
-        raise NotImplementedError
+        pass
 
 
 class JobInWorker(Job):
@@ -40,7 +40,7 @@ class JobInWorker(Job):
 
     def do_work(self):
         """Actual work to be performed here."""
-        raise NotImplementedError
+        pass
 
 
 class JobWithDeps(Job):
@@ -72,7 +72,10 @@ class Scheduler:
         self.running = False
 
     def _caller(self):
-        return asyncio.Task.current_task().job_name
+        if hasattr(asyncio, 'current_task'):
+            return asyncio.current_task().job_name  # New in Python v3.7
+        else:
+            return asyncio.Task.current_task().job_name
 
     def _start_job(self, job):
         task = asyncio.ensure_future(job(self))
