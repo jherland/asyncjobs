@@ -5,8 +5,10 @@ import concurrent.futures
 import itertools
 import logging
 import random
+import sys
 import time
 
+from ansicolors import AnsiColors, AnsiColorFormatter
 from scheduler import JobInWorker, JobWithDeps, Scheduler
 
 logger = logging.getLogger('random_jobs')
@@ -63,7 +65,7 @@ class RandomJob(ParallelTimeWaster):
         names = []
         i = 0
         while True:
-            name = chr(ord('a') + i)
+            name = 'random:' + chr(ord('a') + i)
             yield cls(
                 name=name,
                 deps=set(filter(lambda _: random.random() < dep_prob, names)),
@@ -88,18 +90,29 @@ def main():
     parser.add_argument(
         'workers',
         type=int,
-        help='How many workers to use (0: purely single-threaded)',
+        help='How many workers (<0: #procs, 0: synchronous, >0: #threads)',
+    )
+    parser.add_argument(
+        '-v', '--verbose', action='count', default=0, help='Increase log level'
+    )
+    parser.add_argument(
+        '-q', '--quiet', action='count', default=0, help='Decrease log level'
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.DEBUG,
-        style='{',
-        format=(
-            '{relativeCreated:8.0f} {process:5}/{threadName:10} '
-            '{name:>14}: {message}'
-        ),
+    formatter = AnsiColorFormatter if AnsiColors.enabled else logging.Formatter
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        formatter(
+            fmt=(
+                '{relativeCreated:8.0f} {process:5}/{threadName:10} '
+                '{name:>10}: {message}'
+            ),
+            style='{',
+        )
     )
+    loglevel = logging.WARNING + 10 * (args.quiet - args.verbose)
+    logging.basicConfig(handlers=[handler], level=loglevel)
 
     random.seed(0)  # deterministic
     job_generator = RandomJob.generate(args.dep_prob, args.max_work)
@@ -116,7 +129,7 @@ def main():
     builder = Scheduler(workers)
     for job in jobs:
         builder.add(job)
-    results = asyncio.run(builder.run())
+    results = asyncio.run(builder.run(), debug=False)
     longest_work = max(sum(f.result().values()) for f in results.values())
     print(f'Finished with max(sum(work)) == {longest_work}!')
 

@@ -56,7 +56,8 @@ class JobWithDeps(Job):
         return f'{super().__str__()} [{deps}]'
 
     async def __call__(self, scheduler):
-        self.logger.debug('Awaiting dependencies {self.deps}...')
+        if self.deps:
+            self.logger.debug(f'Awaiting dependencies {self.deps}…')
         self.dep_results = {
             dep: await scheduler.result(dep) for dep in self.deps
         }
@@ -77,7 +78,7 @@ class Scheduler:
         task = asyncio.ensure_future(job(self))
         task.job_name = job.name
         self.results[job.name] = task
-        #  logger.info(f'Started job {job}')
+        #  logger.info(f'{job} started')
 
     def add(self, job):
         """Add a job to be run.
@@ -87,7 +88,7 @@ class Scheduler:
         """
         assert job.name not in self.jobs
         self.jobs[job.name] = job
-        #  logger.info(f'Added job {job}')
+        #  logger.info(f'{job} added')
         if self.running:
             self._start_job(job)
 
@@ -97,30 +98,33 @@ class Scheduler:
         caller = self._caller()
         assert job_name in self.results
         if not self.results[job_name].done():
-            logger.info(f'  {caller} is waiting on {job_name}...')
+            logger.debug(f'{caller} is waiting on {job_name}…')
         result = await (self.results[job_name])
-        logger.info(f'  {job_name} done, returning {result} to {caller}')
+        logger.debug(f'{caller} <- {result} from {job_name}')
         return result
 
     def do_in_worker(self, func, *args):
         """Call 'func(*args)' in a worker and return its future result."""
         assert self.running
-        logger.info(f'Submit to worker: {func}(*{args})')
+        caller = self._caller()
         loop = asyncio.get_running_loop()
         if self.workers is None:  # single-threaded, run synchronously
+            logger.debug(f'{caller} -> doing work…')
             future = loop.create_future()
             try:
                 future.set_result(func(*args))
             except Exception as e:
                 future.set_exception(e)
         else:
+            logger.debug(f'{caller} -> scheduling work')
             future = loop.run_in_executor(self.workers, func, *args)
-        logger.info(f'Returned {future} from worker')
+        result = future if future.done() else '<pending result>'
+        logger.debug(f'{caller} <- {result} from work')
         return future
 
     async def run(self, max_runtime=10, stop_on_first_error=False):
         """Run until all jobs are finished."""
-        logger.info('Running')
+        logger.debug('Running…')
         to_start = reversed(list(self.jobs.values()))
         self.running = True
         for job in to_start:
