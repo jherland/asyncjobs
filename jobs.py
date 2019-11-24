@@ -3,9 +3,7 @@ import asyncio
 import concurrent.futures
 import itertools
 import logging
-from pprint import pprint
 import random
-import sys
 import time
 
 
@@ -36,7 +34,7 @@ class JobInWorker(Job):
 
     def __str__(self):
         return f'{super().__str__()}/{self.work}'
-    
+
     def do_work(self):
         self.logger.info(f'Doing own work: {self.work}')
         time.sleep(self.work / 1000)
@@ -47,13 +45,14 @@ class JobInWorker(Job):
         self.logger.info(f'Scheduling own work')
         future = scheduler.do_in_worker(self.do_work)
         self.logger.info(f'Awaiting own work')
-        result = await future 
+        result = await future
         self.logger.info(f'Awaited own work: {result}')
         return result
 
 
 class JobWithDeps(Job):
     """A Job that has to wait for dependencies to finish."""
+
     def __init__(self, *, deps, **kwargs):
         self.deps = set(deps)
         self.dep_results = {}  # Filled by __call__()
@@ -65,7 +64,9 @@ class JobWithDeps(Job):
 
     async def __call__(self, scheduler):
         self.logger.info('Awaiting dependencies...')
-        self.dep_results = {dep: await scheduler.result(dep) for dep in self.deps}
+        self.dep_results = {
+            dep: await scheduler.result(dep) for dep in self.deps
+        }
         return await super().__call__(scheduler)
 
 
@@ -157,7 +158,7 @@ class Scheduler:
         assert job_name in self.results
         if not self.results[job_name].done():
             self.logger.info(f'  {caller} is waiting on {job_name}...')
-        result = await(self.results[job_name])
+        result = await (self.results[job_name])
         self.logger.info(f'  {job_name} done, returning {result} to {caller}')
         return result
 
@@ -200,18 +201,20 @@ class Scheduler:
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('num_jobs', type=int, help='Number of jobs to run')
     parser.add_argument(
-        'num_jobs', type=int,
-        help='Number of jobs to run')
+        'dep_prob',
+        type=float,
+        help='Probability of depending on each preceding job',
+    )
     parser.add_argument(
-        'dep_prob', type=float,
-        help='Probability of depending on each preceding job')
+        'max_work', type=int, help='Max duration of each job (msecs)'
+    )
     parser.add_argument(
-        'max_work', type=int,
-        help='Max duration of each job (msecs)')
-    parser.add_argument(
-        'workers', type=int,
-        help='How many workers to use (0: purely single-threaded)')
+        'workers',
+        type=int,
+        help='How many workers to use (0: purely single-threaded)',
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -227,18 +230,18 @@ def main():
     if args.workers == 0:
         workers = None
     elif args.workers > 0:
-        workers = concurrent.futures.ThreadPoolExecutor(args.workers, 'Builder')
+        workers = concurrent.futures.ThreadPoolExecutor(
+            args.workers, 'Builder'
+        )
     elif args.workers < 0:
         workers = concurrent.futures.ProcessPoolExecutor(-args.workers)
     builder = Scheduler(workers)
     for job in jobs:
         builder.add(job)
     results = asyncio.run(builder.run())
-    #  print('Finished! Results:')
-    #  pprint({k: sum(v.result().values()) for k, v in results.items()})
     longest_work = max(sum(f.result().values()) for f in results.values())
     print(f'Finished with max(sum(work)) == {longest_work}!')
 
+
 if __name__ == '__main__':
     main()
-
