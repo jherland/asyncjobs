@@ -88,21 +88,34 @@ class Scheduler:
 
         If we're already running (i.e. inside .run()) schedule the job
         immediately, otherwise the job will be scheduled by .run().
+        Raise ValueError if a job with the same name has already been added.
         """
-        assert job.name not in self.jobs
+        if job.name in self.jobs:
+            exist = self.jobs[job.name]
+            raise ValueError(f'Cannot add {job} with same name as {exist}')
         self.jobs[job.name] = job
         #  logger.info(f'{job} added')
         if self.running:
             self._start_job(job)
 
     async def result(self, job_name):
-        """Wait until the given job is finished, and return its result."""
+        """Wait until the given job is finished, and return its result.
+
+        Raise KeyError if the given job has not been added to the scheduler.
+        If the given job raises an exception, then raise CancelledError to
+        cancel the calling job.
+        """
         assert self.running
         caller = self._caller()
-        assert job_name in self.results
+        if job_name not in self.results:
+            raise KeyError(job_name)
         if not self.results[job_name].done():
             logger.debug(f'{caller} is waiting on {job_name}…')
-        result = await (self.results[job_name])
+        try:
+            result = await self.results[job_name]
+        except Exception:
+            logger.info(f'{caller} cancelled due to failing {job_name}')
+            raise concurrent.futures.CancelledError
         logger.debug(f'{caller} <- {result} from {job_name}')
         return result
 
@@ -125,17 +138,17 @@ class Scheduler:
         logger.debug(f'{caller} <- {result} from work')
         return future
 
-    async def run(self, max_runtime=10, stop_on_first_error=False):
+    async def run(self, max_runtime=10, keep_going=False):
         """Run until all jobs are finished."""
         logger.debug('Running…')
         to_start = reversed(list(self.jobs.values()))
         self.running = True
         for job in to_start:
             self._start_job(job)
-        if stop_on_first_error:
-            return_when = concurrent.futures.FIRST_EXCEPTION
-        else:
+        if keep_going:
             return_when = concurrent.futures.ALL_COMPLETED
+        else:
+            return_when = concurrent.futures.FIRST_EXCEPTION
         await asyncio.wait(
             self.results.values(),
             timeout=max_runtime,
