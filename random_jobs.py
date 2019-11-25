@@ -114,24 +114,29 @@ def main():
     loglevel = logging.WARNING + 10 * (args.quiet - args.verbose)
     logging.basicConfig(handlers=[handler], level=loglevel)
 
+    print(f'Generating {args.num_jobs} jobs of work <= {args.max_work}…')
     random.seed(0)  # deterministic
     job_generator = RandomJob.generate(args.dep_prob, args.max_work)
     jobs = list(itertools.islice(job_generator, args.num_jobs))
 
     if args.workers == 0:
+        print('Running synchronously…')
         workers = None
     elif args.workers > 0:
+        print(f'Running with {args.workers} worker threads…')
         workers = concurrent.futures.ThreadPoolExecutor(
             args.workers, 'Builder'
         )
     elif args.workers < 0:
-        workers = concurrent.futures.ProcessPoolExecutor(-args.workers)
+        worker_procs = -args.workers
+        print(f'Running with {worker_procs} worker processes…')
+        workers = concurrent.futures.ProcessPoolExecutor(worker_procs)
     builder = Scheduler(workers)
     for job in jobs:
         builder.add(job)
     results = asyncio.run(builder.run(), debug=False)
     longest_work = max(sum(f.result().values()) for f in results.values())
-    print(f'Finished with max(sum(work)) == {longest_work}!')
+    print(f'Finished with max(sum(work)) == {longest_work}')
 
 
 if __name__ == '__main__':
