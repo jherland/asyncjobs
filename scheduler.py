@@ -139,7 +139,20 @@ class Scheduler:
         return future
 
     async def run(self, max_runtime=10, keep_going=False):
-        """Run until all jobs are finished."""
+        """Run until all jobs are finished.
+
+        if keep_going is disabled (the default), the first failing job (i.e.
+        a job that raises an exception) will cause us to cancel all other
+        concurrent and remaining jobs and return as soon as possible.
+
+        If keep_going is enabled, we will keep running as long as there are
+        jobs to do. Only the jobs that depend (directly or indirectly) on the
+        failing job(s) will be cancelled.
+
+        Return a dictionary mapping job names to the corresponding
+        asyncio.Future objects that encapsulate their fate (result, exception,
+        or cancelled state).
+        """
         logger.debug('Running…')
         to_start = reversed(list(self.jobs.values()))
         self.running = True

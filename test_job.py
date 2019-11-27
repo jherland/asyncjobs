@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import pytest
 
 from scheduler import JobWithDeps, Scheduler
@@ -28,11 +29,25 @@ class TJob(JobWithDeps):
             return self.result
 
 
-def run_jobs(jobs, keep_going=False):
-    scheduler = Scheduler(None)
-    for job in jobs:
-        scheduler.add(job)
-    return asyncio.run(scheduler.run(keep_going=keep_going))
+@pytest.fixture(params=[0, 1, 2, 4, -1, -2, -4])
+def scheduler(request):
+    if request.param == 0:  # run everything syncronously
+        workers = None
+    elif request.param > 0:  # number of worker threads
+        workers = concurrent.futures.ThreadPoolExecutor(request.param)
+    else:  # number of worker processes
+        workers = concurrent.futures.ProcessPoolExecutor(-request.param)
+    return Scheduler(workers)
+
+
+@pytest.fixture
+def run_jobs(scheduler):
+    def _run_jobs(jobs, keep_going=False):
+        for job in jobs:
+            scheduler.add(job)
+        return asyncio.run(scheduler.run(keep_going=keep_going))
+
+    return _run_jobs
 
 
 def assert_all_ok(tasks, jobs):
@@ -58,19 +73,19 @@ def assert_tasks(tasks, expects):
             assert task.result() == expect
 
 
-def test_one_ok_job():
+def test_one_ok_job(run_jobs):
     todo = [TJob('foo')]
     done = run_jobs(todo)
     assert_all_ok(done, todo)
 
 
-def test_two_independent_ok_jobs():
+def test_two_independent_ok_jobs(run_jobs):
     todo = [TJob('foo'), TJob('bar')]
     done = run_jobs(todo)
     assert_all_ok(done, todo)
 
 
-def test_two_dependent_ok_jobs():
+def test_two_dependent_ok_jobs(run_jobs):
     todo = [
         TJob('foo', before={'bar'}),
         TJob('bar', {'foo'}),
@@ -79,18 +94,18 @@ def test_two_dependent_ok_jobs():
     assert_all_ok(done, todo)
 
 
-def test_cannot_add_second_job_with_same_name():
+def test_cannot_add_second_job_with_same_name(run_jobs):
     with pytest.raises(ValueError):
         run_jobs([TJob('foo'), TJob('foo')])
 
 
-def test_job_with_nonexisting_dependency_raises_KeyError():
+def test_job_with_nonexisting_dependency_raises_KeyError(run_jobs):
     done = run_jobs([TJob('foo', {'MISSING'})])
     with pytest.raises(KeyError, match='MISSING'):
         done['foo'].result()
 
 
-def test_one_failed_job():
+def test_one_failed_job(run_jobs):
     done = run_jobs([TJob('foo', result=ValueError('UGH'))])
     assert len(done) == 1
     e = done['foo'].exception()
@@ -99,7 +114,7 @@ def test_one_failed_job():
         done['foo'].result()
 
 
-def test_one_ok_before_one_failed_job():
+def test_one_ok_before_one_failed_job(run_jobs):
     todo = [
         TJob('foo', before={'bar'}),
         TJob('bar', {'foo'}, result=ValueError('UGH')),
@@ -108,7 +123,7 @@ def test_one_ok_before_one_failed_job():
     assert_tasks(done, {'foo': 'foo done', 'bar': ValueError('UGH')})
 
 
-def test_one_ok_after_one_failed_job():
+def test_one_ok_after_one_failed_job(run_jobs):
     todo = [
         TJob('foo', before={'bar'}, result=ValueError('UGH')),
         TJob('bar', {'foo'}),
@@ -117,7 +132,7 @@ def test_one_ok_after_one_failed_job():
     assert_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
 
 
-def test_one_ok_and_one_failed_job_without_keep_going():
+def test_one_ok_and_one_failed_job_without_keep_going(run_jobs):
     todo = [
         TJob('foo', result=ValueError('UGH')),
         TJob('bar', delay=True),
@@ -126,14 +141,10 @@ def test_one_ok_and_one_failed_job_without_keep_going():
     assert_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
 
 
-def test_one_ok_and_one_failed_job_with_keep_going():
+def test_one_ok_and_one_failed_job_with_keep_going(run_jobs):
     todo = [
         TJob('foo', result=ValueError('UGH')),
         TJob('bar', delay=True),
     ]
     done = run_jobs(todo, keep_going=True)
     assert_tasks(done, {'foo': ValueError('UGH'), 'bar': 'bar done'})
-
-
-# TODO:
-# - Fixture that test everything in synchronous/threaded/processed mode
