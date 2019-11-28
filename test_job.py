@@ -2,7 +2,7 @@ import asyncio
 import concurrent.futures
 import pytest
 
-from scheduler import JobWithDeps, Scheduler
+from scheduler import JobWithDeps, JobInWorker, Scheduler
 
 
 class TJob(JobWithDeps):
@@ -23,6 +23,28 @@ class TJob(JobWithDeps):
         for b in self.before:
             assert b in scheduler.tasks  # The other job has been started
             assert not scheduler.tasks[b].done()  # but is not yet finished
+        if isinstance(self.result, Exception):
+            raise self.result
+        else:
+            return self.result
+
+
+class TWorkerJob(JobWithDeps, JobInWorker):
+    """A job done in a worker, with test instrumentation."""
+
+    def __init__(self, name, deps=None, *, result=None, before=None):
+        self.result = '{} worked'.format(name) if result is None else result
+        self.before = set() if before is None else before
+        super().__init__(name=name, deps=deps or set())
+
+    async def __call__(self, scheduler):
+        result = await super().__call__(scheduler)
+        for b in self.before:
+            assert b in scheduler.tasks  # The other job has been started
+            assert not scheduler.tasks[b].done()  # but is not yet finished
+        return result
+
+    def do_work(self):
         if isinstance(self.result, Exception):
             raise self.result
         else:
@@ -184,3 +206,27 @@ def test_one_ok_and_one_failed_job_with_keep_going(run_jobs):
     ]
     done = run_jobs(todo, keep_going=True)
     assert_tasks(done, {'foo': ValueError('UGH'), 'bar': 'bar done'})
+
+
+def test_one_ok_workerjob(run_jobs):
+    todo = [TWorkerJob('foo')]
+    done = run_jobs(todo)
+    assert_tasks(done, {'foo': 'foo worked'})
+
+
+def test_one_failed_workerjob_between_two_ok_workerjobs(run_jobs):
+    todo = [
+        TWorkerJob('foo', before={'bar'}),
+        TWorkerJob('bar', {'foo'}, before={'baz'}, result=ValueError('UGH')),
+        TWorkerJob('baz', {'bar'}),
+    ]
+    done = run_jobs(todo)
+    assert_tasks(
+        done, {'foo': 'foo worked', 'bar': ValueError('UGH'), 'baz': Cancelled}
+    )
+
+
+# TODO:
+# - test timeout
+# - test redirected and prefixed output from workers
+# - test build stats

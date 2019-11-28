@@ -30,7 +30,7 @@ class JobInWorker(Job):
     """A Job where the actual work is done in a worker."""
 
     async def __call__(self, scheduler):
-        """Schedule self.do_work() to be called in a worker."""
+        """Call self.do_work() in a worker and wait for its result."""
         await super().__call__(scheduler)
         self.logger.debug(f'Scheduling own work')
         future = scheduler.do_in_worker(self.do_work)
