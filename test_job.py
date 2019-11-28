@@ -21,8 +21,8 @@ class TJob(JobWithDeps):
         if self.delay:
             await asyncio.sleep(0.01)
         for b in self.before:
-            assert b in scheduler.results  # The other job has been started
-            assert not scheduler.results[b].done()  # but is not yet finished
+            assert b in scheduler.tasks  # The other job has been started
+            assert not scheduler.tasks[b].done()  # but is not yet finished
         if isinstance(self.result, Exception):
             raise self.result
         else:
@@ -123,13 +123,49 @@ def test_one_ok_before_one_failed_job(run_jobs):
     assert_tasks(done, {'foo': 'foo done', 'bar': ValueError('UGH')})
 
 
-def test_one_ok_after_one_failed_job(run_jobs):
+def test_one_failed_job_before_one_ok_job(run_jobs):
     todo = [
         TJob('foo', before={'bar'}, result=ValueError('UGH')),
         TJob('bar', {'foo'}),
     ]
     done = run_jobs(todo)
     assert_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
+
+
+def test_one_failed_job_before_two_ok_jobs(run_jobs):
+    todo = [
+        TJob('foo', before={'bar', 'baz'}, result=ValueError('UGH')),
+        TJob('bar', {'foo'}),
+        TJob('baz', {'foo'}),
+    ]
+    done = run_jobs(todo)
+    assert_tasks(
+        done, {'foo': ValueError('UGH'), 'bar': Cancelled, 'baz': Cancelled}
+    )
+
+
+def test_one_failed_job_before_one_ok_job_before_one_ok_job(run_jobs):
+    todo = [
+        TJob('foo', before={'bar'}, result=ValueError('UGH')),
+        TJob('bar', {'foo'}, before={'baz'}),
+        TJob('baz', {'bar'}),
+    ]
+    done = run_jobs(todo)
+    assert_tasks(
+        done, {'foo': ValueError('UGH'), 'bar': Cancelled, 'baz': Cancelled}
+    )
+
+
+def test_one_failed_job_between_two_ok_jobs(run_jobs):
+    todo = [
+        TJob('foo', before={'bar'}),
+        TJob('bar', {'foo'}, before={'baz'}, result=ValueError('UGH')),
+        TJob('baz', {'bar'}),
+    ]
+    done = run_jobs(todo)
+    assert_tasks(
+        done, {'foo': 'foo done', 'bar': ValueError('UGH'), 'baz': Cancelled}
+    )
 
 
 def test_one_ok_and_one_failed_job_without_keep_going(run_jobs):

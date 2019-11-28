@@ -31,6 +31,7 @@ class JobInWorker(Job):
 
     async def __call__(self, scheduler):
         """Schedule self.do_work() to be called in a worker."""
+        await super().__call__(scheduler)
         self.logger.debug(f'Scheduling own work')
         future = scheduler.do_in_worker(self.do_work)
         self.logger.debug(f'Awaiting own work')
@@ -58,9 +59,7 @@ class JobWithDeps(Job):
     async def __call__(self, scheduler):
         if self.deps:
             self.logger.debug(f'Awaiting dependencies {self.deps}…')
-        self.dep_results = {
-            dep: await scheduler.result(dep) for dep in self.deps
-        }
+            self.dep_results = await scheduler.results(*self.deps)
         return await super().__call__(scheduler)
 
 
@@ -68,19 +67,28 @@ class Scheduler:
     def __init__(self, workers=None):
         self.workers = workers
         self.jobs = {}  # name -> Job
-        self.results = {}  # name -> (future) result from job()
+        self.tasks = {}  # name -> Task object, aka. (future) result from job()
         self.running = False
 
     def _caller(self):
-        if hasattr(asyncio, 'current_task'):
-            return asyncio.current_task().job_name  # New in Python v3.7
+        if hasattr(asyncio, 'current_task'):  # Added in Python v3.7
+            task = asyncio.current_task()
         else:
-            return asyncio.Task.current_task().job_name
+            task = asyncio.Task.current_task()
+        if hasattr(asyncio.Task, 'get_name'):  # Added in Python v3.8
+            return task.get_name()
+        else:
+            return task.job_name
 
     def _start_job(self, job):
-        task = asyncio.ensure_future(job(self))
-        task.job_name = job.name
-        self.results[job.name] = task
+        if hasattr(asyncio.Task, 'get_name'):  # Added in Python v3.8
+            self.tasks[job.name] = asyncio.create_task(
+                job(self), name=job.name
+            )
+        else:
+            task = asyncio.ensure_future(job(self))
+            task.job_name = job.name
+            self.tasks[job.name] = task
         #  logger.info(f'{job} started')
 
     def add(self, job):
@@ -98,26 +106,28 @@ class Scheduler:
         if self.running:
             self._start_job(job)
 
-    async def result(self, job_name):
-        """Wait until the given job is finished, and return its result.
+    async def results(self, *job_names):
+        """Wait until the given jobs are finished, and return their results.
 
-        Raise KeyError if the given job has not been added to the scheduler.
-        If the given job raises an exception, then raise CancelledError to
-        cancel the calling job.
+        Returns a dictionary mapping job names to their results.
+
+        Raise KeyError if any of the given jobs have not been added to the
+        scheduler. If any of the given jobs raise an exception, then raise
+        CancelledError here to cancel the calling job.
         """
         assert self.running
         caller = self._caller()
-        if job_name not in self.results:
-            raise KeyError(job_name)
-        if not self.results[job_name].done():
-            logger.debug(f'{caller} is waiting on {job_name}…')
+        tasks = [self.tasks[n] for n in job_names]
+        pending = [n for n, t in zip(job_names, tasks) if not t.done()]
+        if pending:
+            logger.debug(f'{caller} is waiting for {", ".join(pending)}…')
         try:
-            result = await self.results[job_name]
+            results = dict(zip(job_names, await asyncio.gather(*tasks)))
         except Exception:
-            logger.info(f'{caller} cancelled due to failing {job_name}')
+            logger.info(f'{caller} cancelled due to failure(s) in {job_names}')
             raise concurrent.futures.CancelledError
-        logger.debug(f'{caller} <- {result} from {job_name}')
-        return result
+        logger.debug(f'{caller} <- {results} from .results()')
+        return results
 
     def do_in_worker(self, func, *args):
         """Call 'func(*args)' in a worker and return its future result."""
@@ -135,7 +145,7 @@ class Scheduler:
             logger.debug(f'{caller} -> scheduling work')
             future = loop.run_in_executor(self.workers, func, *args)
         result = future if future.done() else '<pending result>'
-        logger.debug(f'{caller} <- {result} from work')
+        logger.debug(f'{caller} <- {result} from worker')
         return future
 
     async def run(self, max_runtime=10, keep_going=False):
@@ -154,7 +164,7 @@ class Scheduler:
         or cancelled state).
         """
         logger.debug('Running…')
-        to_start = reversed(list(self.jobs.values()))
+        to_start = list(self.jobs.values())
         self.running = True
         for job in to_start:
             self._start_job(job)
@@ -163,10 +173,8 @@ class Scheduler:
         else:
             return_when = concurrent.futures.FIRST_EXCEPTION
         await asyncio.wait(
-            self.results.values(),
-            timeout=max_runtime,
-            return_when=return_when,
+            self.tasks.values(), timeout=max_runtime, return_when=return_when,
         )
         if self.workers is not None:
             self.workers.shutdown()
-        return self.results
+        return self.tasks
