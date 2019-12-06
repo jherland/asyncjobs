@@ -19,7 +19,7 @@ stdenv.mkDerivation {
     export PYTHONPATH=$(pipenv --venv)/lib/python3.7/site-packages/:$PYTHONPATH
 
     # Install Pipfile dependencies
-    ${pipenv}/bin/pipenv install
+    ${pipenv}/bin/pipenv install --dev
     ${pipenv}/bin/pipenv shell
   '';
 }
