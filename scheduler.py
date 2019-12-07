@@ -65,6 +65,13 @@ class JobWithDeps(Job):
         return await super().__call__(scheduler)
 
 
+def current_task():
+    if hasattr(asyncio, 'current_task'):  # Added in Python v3.7
+        return asyncio.current_task()
+    else:
+        return asyncio.Task.current_task()
+
+
 class Scheduler:
     def __init__(self, workers=None):
         self.workers = workers
@@ -73,10 +80,7 @@ class Scheduler:
         self.running = False
 
     def _caller(self):
-        if hasattr(asyncio, 'current_task'):  # Added in Python v3.7
-            task = asyncio.current_task()
-        else:
-            task = asyncio.Task.current_task()
+        task = current_task()
         if hasattr(asyncio.Task, 'get_name'):  # Added in Python v3.8
             return task.get_name()
         else:
@@ -198,23 +202,28 @@ class Scheduler:
 class SignalHandingScheduler(Scheduler):
     handle_signals = {signal.SIGHUP, signal.SIGTERM, signal.SIGINT}
 
-    def _caught_signal_async(self, signum):
+    def _caught_signal_async(self, signum, cancel_caller=None):
         logger.warning(f'Caught signal {signum} while async!')
         assert self.running
         cancelled, total = 0, 0
-        for task in self.tasks.values():
+        for job_name, task in self.tasks.items():
             total += 1
             if not task.done():
-                logger.warning(f'Cancelling task {task}')
+                logger.warning(f'Cancelling job {job_name}…')
                 task.cancel()
                 cancelled += 1
-        logger.warning(f'Cancelled {cancelled}/{total} tasks')
+        logger.warning(f'Cancelled {cancelled}/{total} jobs')
+        if cancel_caller is not None and not cancel_caller.done():
+            logger.warning(f'Cancelling caller task…')
+            cancel_caller.cancel()
 
     @contextmanager
     def _handle_signals_async(self):
         loop = asyncio.get_running_loop()
         for signum in self.handle_signals:
-            loop.add_signal_handler(signum, self._caught_signal_async, signum)
+            loop.add_signal_handler(
+                signum, self._caught_signal_async, signum, current_task()
+            )
         try:
             yield
         finally:
@@ -223,7 +232,7 @@ class SignalHandingScheduler(Scheduler):
 
     def _caught_signal_sync(self, signum, stack_frame):
         logger.warning(f'Caught signal {signum} while sync!')
-        logger.warning('Cancelling current work')
+        logger.warning('Cancelling current work…')
         raise asyncio.CancelledError
 
     @contextmanager
@@ -243,5 +252,11 @@ class SignalHandingScheduler(Scheduler):
             return super()._do_sync_work(*args, **kwargs)
 
     async def _run_tasks(self, *args, **kwargs):
-        with self._handle_signals_async():
-            return await super()._run_tasks(*args, **kwargs)
+        try:
+            with self._handle_signals_async():
+                return await super()._run_tasks(*args, **kwargs)
+        except asyncio.CancelledError:
+            logger.error('Intercepted Cancelled on the way out')
+            if self.workers is not None:
+                self.workers.shutdown(wait=False)
+                self.workers = None
