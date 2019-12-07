@@ -64,10 +64,10 @@ def scheduler(request):
 
 @pytest.fixture
 def run_jobs(scheduler):
-    def _run_jobs(jobs, keep_going=False):
+    def _run_jobs(jobs, **kwargs):
         for job in jobs:
             scheduler.add(job)
-        return asyncio.run(scheduler.run(keep_going=keep_going))
+        return asyncio.run(scheduler.run(**kwargs), debug=True)
 
     return _run_jobs
 
@@ -93,6 +93,11 @@ def assert_tasks(tasks, expects):
             assert e.args == expect.args
         else:
             assert task.result() == expect
+
+
+def test_zero_jobs_does_nothing(run_jobs):
+    done = run_jobs([])
+    assert done == {}
 
 
 def test_one_ok_job(run_jobs):

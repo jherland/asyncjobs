@@ -148,10 +148,10 @@ class Scheduler:
         logger.debug(f'{caller} <- {result} from worker')
         return future
 
-    async def run(self, max_runtime=10, keep_going=False):
+    async def run(self, keep_going=False):
         """Run until all jobs are finished.
 
-        if keep_going is disabled (the default), the first failing job (i.e.
+        If keep_going is disabled (the default), the first failing job (i.e.
         a job that raises an exception) will cause us to cancel all other
         concurrent and remaining jobs and return as soon as possible.
 
@@ -164,17 +164,22 @@ class Scheduler:
         or cancelled state).
         """
         logger.debug('Running…')
-        to_start = list(self.jobs.values())
-        self.running = True
-        for job in to_start:
-            self._start_job(job)
         if keep_going:
             return_when = concurrent.futures.ALL_COMPLETED
         else:
             return_when = concurrent.futures.FIRST_EXCEPTION
-        await asyncio.wait(
-            self.tasks.values(), timeout=max_runtime, return_when=return_when,
-        )
+
+        to_start = list(self.jobs.values())
+        if not to_start:
+            logger.warning('Nothing to do!')
+            return self.tasks
+        for job in to_start:
+            self._start_job(job)
+
+        self.running = True
+        await asyncio.wait(self.tasks.values(), return_when=return_when)
+        self.running = False
+
         if self.workers is not None:
             self.workers.shutdown()
         return self.tasks
