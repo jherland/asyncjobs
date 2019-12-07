@@ -7,7 +7,7 @@ import pytest
 import signal
 import time
 
-from scheduler import JobWithDeps, JobInWorker, Scheduler
+from scheduler import JobWithDeps, JobInWorker, SignalHandingScheduler
 
 
 logger = logging.getLogger('test_job')
@@ -71,7 +71,7 @@ def scheduler(request):
     else:  # number of worker processes
         logger.info(f'Creating scheduler with {-request.param} worker procs')
         workers = concurrent.futures.ProcessPoolExecutor(-request.param)
-    return Scheduler(workers)
+    yield SignalHandingScheduler(workers)
 
 
 @contextmanager
@@ -259,6 +259,24 @@ def test_one_failed_workerjob_between_two_ok_workerjobs(run_jobs):
     assert_tasks(
         done, {'foo': 'foo worked', 'bar': ValueError('UGH'), 'baz': Cancelled}
     )
+
+
+def test_abort_one_job(run_jobs):
+    todo = [TJob('foo', asleep=0.3)]
+    before = time.time()
+    done = run_jobs(todo, abort_after=0.1)
+    after = time.time()
+    assert after < before + 0.3
+    assert_tasks(done, {'foo': Cancelled})
+
+
+def test_abort_one_workerjob(run_jobs):
+    todo = [TWorkerJob('foo', sleep=0.3)]
+    before = time.time()
+    done = run_jobs(todo, abort_after=0.1)
+    after = time.time()
+    assert after < before + 0.3
+    assert_tasks(done, {'foo': Cancelled})
 
 
 # TODO:

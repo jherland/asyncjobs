@@ -1,6 +1,8 @@
 import asyncio
 import concurrent.futures
+from contextlib import contextmanager
 import logging
+import signal
 
 
 logger = logging.getLogger('scheduler')
@@ -191,3 +193,55 @@ class Scheduler:
         if self.workers is not None:
             self.workers.shutdown()
         return self.tasks
+
+
+class SignalHandingScheduler(Scheduler):
+    handle_signals = {signal.SIGHUP, signal.SIGTERM, signal.SIGINT}
+
+    def _caught_signal_async(self, signum):
+        logger.warning(f'Caught signal {signum} while async!')
+        assert self.running
+        cancelled, total = 0, 0
+        for task in self.tasks.values():
+            total += 1
+            if not task.done():
+                logger.warning(f'Cancelling task {task}')
+                task.cancel()
+                cancelled += 1
+        logger.warning(f'Cancelled {cancelled}/{total} tasks')
+
+    @contextmanager
+    def _handle_signals_async(self):
+        loop = asyncio.get_running_loop()
+        for signum in self.handle_signals:
+            loop.add_signal_handler(signum, self._caught_signal_async, signum)
+        try:
+            yield
+        finally:
+            for signum in self.handle_signals:
+                loop.remove_signal_handler(signum)
+
+    def _caught_signal_sync(self, signum, stack_frame):
+        logger.warning(f'Caught signal {signum} while sync!')
+        logger.warning('Cancelling current work')
+        raise asyncio.CancelledError
+
+    @contextmanager
+    def _handle_signals_sync(self):
+        prev_handlers = {
+            signum: signal.signal(signum, self._caught_signal_sync)
+            for signum in self.handle_signals
+        }
+        try:
+            yield
+        finally:
+            for signum, handler in prev_handlers.items():
+                signal.signal(signum, handler)
+
+    def _do_sync_work(self, *args, **kwargs):
+        with self._handle_signals_sync():
+            return super()._do_sync_work(*args, **kwargs)
+
+    async def _run_tasks(self, *args, **kwargs):
+        with self._handle_signals_async():
+            return await super()._run_tasks(*args, **kwargs)
