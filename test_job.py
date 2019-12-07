@@ -1,9 +1,16 @@
 import asyncio
 import concurrent.futures
+from contextlib import contextmanager
+import logging
+import os
 import pytest
+import signal
 import time
 
 from scheduler import JobWithDeps, JobInWorker, Scheduler
+
+
+logger = logging.getLogger('test_job')
 
 
 class TJob(JobWithDeps):
@@ -56,20 +63,41 @@ class TWorkerJob(JobWithDeps, JobInWorker):
 @pytest.fixture(params=[0, 1, 2, 4, -1, -2, -4])
 def scheduler(request):
     if request.param == 0:  # run everything syncronously
+        logger.info('Creating single-threaded/syncronous scheduler')
         workers = None
     elif request.param > 0:  # number of worker threads
+        logger.info(f'Creating scheduler with {request.param} worker threads')
         workers = concurrent.futures.ThreadPoolExecutor(request.param)
     else:  # number of worker processes
+        logger.info(f'Creating scheduler with {-request.param} worker procs')
         workers = concurrent.futures.ProcessPoolExecutor(-request.param)
     return Scheduler(workers)
 
 
+@contextmanager
+def abort_in(when=0):
+    def handle_SIGALRM(signal_number, stack_frame):
+        logger.warning('Raising SIGINT to simulate Ctrl+C...')
+        os.kill(os.getpid(), signal.SIGINT)
+
+    prev_handler = signal.signal(signal.SIGALRM, handle_SIGALRM)
+    signal.setitimer(signal.ITIMER_REAL, when)
+    try:
+        yield
+    except KeyboardInterrupt:
+        logger.error('SIGINT/KeyboardInterrupt escaped the context!')
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, prev_handler)
+
+
 @pytest.fixture
 def run_jobs(scheduler):
-    def _run_jobs(jobs, **kwargs):
+    def _run_jobs(jobs, abort_after=0, **kwargs):
         for job in jobs:
             scheduler.add(job)
-        return asyncio.run(scheduler.run(**kwargs), debug=True)
+        with abort_in(abort_after):
+            return asyncio.run(scheduler.run(**kwargs), debug=True)
 
     return _run_jobs
 
