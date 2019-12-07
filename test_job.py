@@ -277,9 +277,3 @@ def test_abort_one_workerjob(run_jobs):
     after = time.time()
     assert after < before + 0.3
     assert_tasks(done, {'foo': Cancelled})
-
-
-# TODO:
-# - test timeout
-# - test redirected and prefixed output from workers
-# - test build stats
