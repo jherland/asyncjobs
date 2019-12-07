@@ -129,24 +129,34 @@ class Scheduler:
         logger.debug(f'{caller} <- {results} from .results()')
         return results
 
+    def _do_sync_work(self, loop, func, *args):
+        future = loop.create_future()
+        try:
+            future.set_result(func(*args))
+        except Exception as e:
+            future.set_exception(e)
+        return future
+
     def do_in_worker(self, func, *args):
         """Call 'func(*args)' in a worker and return its future result."""
         assert self.running
         caller = self._caller()
         loop = asyncio.get_running_loop()
         if self.workers is None:  # single-threaded, run synchronously
-            logger.debug(f'{caller} -> doing work…')
-            future = loop.create_future()
-            try:
-                future.set_result(func(*args))
-            except Exception as e:
-                future.set_exception(e)
+            logger.debug(f'{caller} -> doing work synchronously…')
+            future = self._do_sync_work(loop, func, *args)
         else:
             logger.debug(f'{caller} -> scheduling work')
             future = loop.run_in_executor(self.workers, func, *args)
         result = future if future.done() else '<pending result>'
         logger.debug(f'{caller} <- {result} from worker')
         return future
+
+    async def _run_tasks(self, return_when):
+        logger.info(f'Waiting for all jobs to complete…')
+        self.running = True
+        await asyncio.wait(self.tasks.values(), return_when=return_when)
+        self.running = False
 
     async def run(self, keep_going=False):
         """Run until all jobs are finished.
@@ -176,9 +186,7 @@ class Scheduler:
         for job in to_start:
             self._start_job(job)
 
-        self.running = True
-        await asyncio.wait(self.tasks.values(), return_when=return_when)
-        self.running = False
+        await self._run_tasks(return_when)
 
         if self.workers is not None:
             self.workers.shutdown()
