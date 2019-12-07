@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import pytest
+import time
 
 from scheduler import JobWithDeps, JobInWorker, Scheduler
 
@@ -8,18 +9,16 @@ from scheduler import JobWithDeps, JobInWorker, Scheduler
 class TJob(JobWithDeps):
     """A job with test instrumentation."""
 
-    def __init__(
-        self, name, deps=None, *, result=None, before=None, delay=False
-    ):
+    def __init__(self, name, deps=None, *, result=None, before=None, asleep=0):
         self.result = '{} done'.format(name) if result is None else result
         self.before = set() if before is None else before
-        self.delay = delay  # Allow other jobs to run before we conclude
+        self.asleep = asleep
         super().__init__(name=name, deps=deps or set())
 
     async def __call__(self, scheduler):
         await super().__call__(scheduler)
-        if self.delay:
-            await asyncio.sleep(0.01)
+        if self.asleep:
+            await asyncio.sleep(self.asleep)
         for b in self.before:
             assert b in scheduler.tasks  # The other job has been started
             assert not scheduler.tasks[b].done()  # but is not yet finished
@@ -32,9 +31,10 @@ class TJob(JobWithDeps):
 class TWorkerJob(JobWithDeps, JobInWorker):
     """A job done in a worker, with test instrumentation."""
 
-    def __init__(self, name, deps=None, *, result=None, before=None):
+    def __init__(self, name, deps=None, *, result=None, before=None, sleep=0):
         self.result = '{} worked'.format(name) if result is None else result
         self.before = set() if before is None else before
+        self.sleep = sleep
         super().__init__(name=name, deps=deps or set())
 
     async def __call__(self, scheduler):
@@ -45,6 +45,8 @@ class TWorkerJob(JobWithDeps, JobInWorker):
         return result
 
     def do_work(self):
+        if self.sleep:
+            time.sleep(self.sleep)
         if isinstance(self.result, Exception):
             raise self.result
         else:
@@ -198,7 +200,7 @@ def test_one_failed_job_between_two_ok_jobs(run_jobs):
 def test_one_ok_and_one_failed_job_without_keep_going(run_jobs):
     todo = [
         TJob('foo', result=ValueError('UGH')),
-        TJob('bar', delay=True),
+        TJob('bar', asleep=0.01),
     ]
     done = run_jobs(todo, keep_going=False)
     assert_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
@@ -207,7 +209,7 @@ def test_one_ok_and_one_failed_job_without_keep_going(run_jobs):
 def test_one_ok_and_one_failed_job_with_keep_going(run_jobs):
     todo = [
         TJob('foo', result=ValueError('UGH')),
-        TJob('bar', delay=True),
+        TJob('bar', asleep=0.01),
     ]
     done = run_jobs(todo, keep_going=True)
     assert_tasks(done, {'foo': ValueError('UGH'), 'bar': 'bar done'})
