@@ -25,13 +25,17 @@ class TJob(JobWithDeps):
     async def __call__(self, scheduler):
         await super().__call__(scheduler)
         if self.asleep:
+            logger.info(f'Async sleeping for {self.asleep} seconds…')
             await asyncio.sleep(self.asleep)
+            logger.info(f'Finished async sleep')
         for b in self.before:
             assert b in scheduler.tasks  # The other job has been started
             assert not scheduler.tasks[b].done()  # but is not yet finished
         if isinstance(self.result, Exception):
+            logger.info(f'Raising {self.result}')
             raise self.result
         else:
+            logger.info(f'Returning {self.result}')
             return self.result
 
 
@@ -53,10 +57,14 @@ class TWorkerJob(JobWithDeps, JobInWorker):
 
     def do_work(self):
         if self.sleep:
+            logger.info(f'Sleeping for {self.sleep} seconds…')
             time.sleep(self.sleep)
+            logger.info(f'Finished sleep')
         if isinstance(self.result, Exception):
+            logger.info(f'Raising {self.result}')
             raise self.result
         else:
+            logger.info(f'Returning {self.result}')
             return self.result
 
 
