@@ -1,5 +1,4 @@
 import asyncio
-import concurrent.futures
 from contextlib import contextmanager
 import logging
 import os
@@ -68,18 +67,10 @@ class TWorkerJob(JobWithDeps, JobInWorker):
             return self.result
 
 
-@pytest.fixture(params=[0, 1, 2, 4, -1, -2, -4])
+@pytest.fixture(params=[1, 2, 4])
 def scheduler(request):
-    if request.param == 0:  # run everything syncronously
-        logger.info('Creating single-threaded/syncronous scheduler')
-        workers = None
-    elif request.param > 0:  # number of worker threads
-        logger.info(f'Creating scheduler with {request.param} worker threads')
-        workers = concurrent.futures.ThreadPoolExecutor(request.param)
-    else:  # number of worker processes
-        logger.info(f'Creating scheduler with {-request.param} worker procs')
-        workers = concurrent.futures.ProcessPoolExecutor(-request.param)
-    yield SignalHandingScheduler(workers)
+    logger.info(f'Creating scheduler with {request.param} worker threads')
+    yield SignalHandingScheduler(workers=request.param)
 
 
 @contextmanager

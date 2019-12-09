@@ -1,6 +1,6 @@
 import asyncio
 import concurrent.futures
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 import logging
 import signal
 
@@ -34,10 +34,8 @@ class JobInWorker(Job):
     async def __call__(self, scheduler):
         """Call self.do_work() in a worker and wait for its result."""
         await super().__call__(scheduler)
-        self.logger.debug(f'Scheduling own work')
-        future = scheduler.do_in_worker(self.do_work)
-        self.logger.debug(f'Awaiting own work')
-        result = await future
+        self.logger.debug(f'Awaiting own work…')
+        result = await scheduler.do_in_worker(self.do_work)
         self.logger.debug(f'Awaited own work: {result}')
         return result
 
@@ -73,8 +71,12 @@ def current_task():
 
 
 class Scheduler:
-    def __init__(self, workers=None):
+    def __init__(self, workers=1):
+        assert workers > 0
         self.workers = workers
+        self.worker_sem = None
+        self.worker_threads = None
+
         self.jobs = {}  # name -> Job
         self.tasks = {}  # name -> Task object, aka. (future) result from job()
         self.running = False
@@ -135,28 +137,40 @@ class Scheduler:
         logger.debug(f'{caller} <- {results} from .results()')
         return results
 
-    def _do_sync_work(self, loop, func, *args):
-        future = loop.create_future()
-        try:
-            future.set_result(func(*args))
-        except Exception as e:
-            future.set_exception(e)
-        return future
+    @asynccontextmanager
+    async def reserved_worker(self):
+        """Acquire a worker context where the caller can run its own work."""
+        assert self.running
+        caller = self._caller()
+        logger.debug(f'{caller} -> Acquiring worker semaphore…')
+        async with self.worker_sem:
+            logger.debug(f'{caller} -- Acquired worker semaphore')
+            try:
+                yield
+            finally:
+                logger.debug(f'{caller} <- Releasing worker semaphore')
 
-    def do_in_worker(self, func, *args):
-        """Call 'func(*args)' in a worker and return its future result."""
+    async def do_in_worker(self, func, *args):
+        """Call func(*args) in a worker thread and await its result."""
         assert self.running
         caller = self._caller()
         loop = asyncio.get_running_loop()
-        if self.workers is None:  # single-threaded, run synchronously
-            logger.debug(f'{caller} -> doing work synchronously…')
-            future = self._do_sync_work(loop, func, *args)
-        else:
+        async with self.reserved_worker():
+            if self.worker_threads is None:
+                self.worker_threads = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self.workers,
+                    thread_name_prefix='Worker Thread',
+                )
             logger.debug(f'{caller} -> scheduling work')
-            future = loop.run_in_executor(self.workers, func, *args)
-        result = future if future.done() else '<pending result>'
-        logger.debug(f'{caller} <- {result} from worker')
-        return future
+            try:
+                future = loop.run_in_executor(self.worker_threads, func, *args)
+                logger.debug(f'{caller} -- awaiting work…')
+                result = await future
+                logger.debug(f'{caller} <- {result} from worker')
+                return result
+            except Exception as e:
+                logger.warning(f'{caller} <- Exception {e} from worker!')
+                raise
 
     async def _run_tasks(self, return_when):
         logger.info(f'Waiting for all jobs to complete…')
@@ -180,6 +194,7 @@ class Scheduler:
         or cancelled state).
         """
         logger.debug('Running…')
+        self.worker_sem = asyncio.BoundedSemaphore(self.workers)
         if keep_going:
             return_when = concurrent.futures.ALL_COMPLETED
         else:
@@ -194,8 +209,10 @@ class Scheduler:
 
         await self._run_tasks(return_when)
 
-        if self.workers is not None:
-            self.workers.shutdown()
+        if self.worker_threads is not None:
+            logger.debug('Shutting down worker threads…')
+            self.worker_threads.shutdown()  # wait=timeout is None)
+            logger.debug('Shut down worker threads')
         return self.tasks
 
 
@@ -257,6 +274,6 @@ class SignalHandingScheduler(Scheduler):
                 return await super()._run_tasks(*args, **kwargs)
         except asyncio.CancelledError:
             logger.error('Intercepted Cancelled on the way out')
-            if self.workers is not None:
-                self.workers.shutdown(wait=False)
-                self.workers = None
+            if self.worker_threads is not None:
+                self.worker_threads.shutdown(wait=False)
+                self.worker_threads = None
