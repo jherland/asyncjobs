@@ -215,14 +215,18 @@ class SchedulerWithWorkers(Scheduler):
     async def _run_tasks(self, *args, **kwargs):
         self.worker_sem = asyncio.BoundedSemaphore(self.workers)
 
-        result = await super()._run_tasks(*args, **kwargs)
-
-        if self.worker_threads is not None:
-            logger.debug('Shutting down worker threads…')
-            self.worker_threads.shutdown()  # wait=timeout is None)
-            logger.debug('Shut down worker threads')
-
-        return result
+        try:
+            await super()._run_tasks(*args, **kwargs)
+            if self.worker_threads is not None:
+                logger.debug('Shutting down worker threads…')
+                self.worker_threads.shutdown()  # wait=timeout is None)
+                self.worker_threads = None
+                logger.debug('Shut down worker threads')
+        finally:
+            if self.worker_threads is not None:
+                logger.error('Cancelling without awaiting workers…')
+                self.worker_threads.shutdown(wait=False)
+                self.worker_threads = None
 
 
 class SignalHandingScheduler(Scheduler):
@@ -248,20 +252,16 @@ class SignalHandingScheduler(Scheduler):
         loop = asyncio.get_running_loop()
         for signum in self.handle_signals:
             loop.add_signal_handler(
-                signum, self._caught_signal, signum, current_task()
+                signum, self._caught_signal, signum, current_task(),
             )
         try:
             yield
+        except asyncio.CancelledError:
+            logger.warning('Intercepted Cancelled on the way out')
         finally:
             for signum in self.handle_signals:
                 loop.remove_signal_handler(signum)
 
     async def _run_tasks(self, *args, **kwargs):
-        try:
-            with self._handle_signals():
-                return await super()._run_tasks(*args, **kwargs)
-        except asyncio.CancelledError:
-            logger.error('Intercepted Cancelled on the way out')
-            if self.worker_threads is not None:
-                self.worker_threads.shutdown(wait=False)
-                self.worker_threads = None
+        with self._handle_signals():
+            return await super()._run_tasks(*args, **kwargs)
