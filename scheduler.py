@@ -70,6 +70,16 @@ def current_task():
         return asyncio.Task.current_task()
 
 
+def current_task_name():
+    task = current_task()
+    if hasattr(asyncio.Task, 'get_name'):  # Added in Python v3.8
+        return task.get_name()
+    elif hasattr(task, 'job_name'):  # Added by Scheduler._start_job
+        return task.job_name
+    else:
+        return None
+
+
 class Scheduler:
     def __init__(self, workers=1):
         assert workers > 0
@@ -80,13 +90,6 @@ class Scheduler:
         self.jobs = {}  # name -> Job
         self.tasks = {}  # name -> Task object, aka. (future) result from job()
         self.running = False
-
-    def _caller(self):
-        task = current_task()
-        if hasattr(asyncio.Task, 'get_name'):  # Added in Python v3.8
-            return task.get_name()
-        else:
-            return task.job_name
 
     def _start_job(self, job):
         if hasattr(asyncio.Task, 'get_name'):  # Added in Python v3.8
@@ -124,7 +127,7 @@ class Scheduler:
         CancelledError here to cancel the calling job.
         """
         assert self.running
-        caller = self._caller()
+        caller = current_task_name()
         tasks = [self.tasks[n] for n in job_names]
         pending = [n for n, t in zip(job_names, tasks) if not t.done()]
         if pending:
@@ -141,7 +144,7 @@ class Scheduler:
     async def reserved_worker(self):
         """Acquire a worker context where the caller can run its own work."""
         assert self.running
-        caller = self._caller()
+        caller = current_task_name()
         logger.debug(f'{caller} -> Acquiring worker semaphore…')
         async with self.worker_sem:
             logger.debug(f'{caller} -- Acquired worker semaphore')
@@ -153,7 +156,7 @@ class Scheduler:
     async def do_in_worker(self, func, *args):
         """Call func(*args) in a worker thread and await its result."""
         assert self.running
-        caller = self._caller()
+        caller = current_task_name()
         loop = asyncio.get_running_loop()
         async with self.reserved_worker():
             if self.worker_threads is None:
