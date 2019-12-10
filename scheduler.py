@@ -228,8 +228,8 @@ class SchedulerWithWorkers(Scheduler):
 class SignalHandingScheduler(Scheduler):
     handle_signals = {signal.SIGHUP, signal.SIGTERM, signal.SIGINT}
 
-    def _caught_signal_async(self, signum, cancel_caller=None):
-        logger.warning(f'Caught signal {signum} while async!')
+    def _caught_signal(self, signum, cancel_caller=None):
+        logger.warning(f'Caught signal {signum}!')
         assert self.running
         cancelled, total = 0, 0
         for job_name, task in self.tasks.items():
@@ -244,11 +244,11 @@ class SignalHandingScheduler(Scheduler):
             cancel_caller.cancel()
 
     @contextmanager
-    def _handle_signals_async(self):
+    def _handle_signals(self):
         loop = asyncio.get_running_loop()
         for signum in self.handle_signals:
             loop.add_signal_handler(
-                signum, self._caught_signal_async, signum, current_task()
+                signum, self._caught_signal, signum, current_task()
             )
         try:
             yield
@@ -258,7 +258,7 @@ class SignalHandingScheduler(Scheduler):
 
     async def _run_tasks(self, *args, **kwargs):
         try:
-            with self._handle_signals_async():
+            with self._handle_signals():
                 return await super()._run_tasks(*args, **kwargs)
         except asyncio.CancelledError:
             logger.error('Intercepted Cancelled on the way out')
