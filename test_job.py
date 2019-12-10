@@ -4,6 +4,7 @@ import logging
 import os
 import pytest
 import signal
+import subprocess
 import time
 
 from scheduler import (
@@ -72,6 +73,28 @@ class TWorkerJob(JobWithDeps, JobInWorker):
             return self.result
 
 
+class TProcJob(TJob):
+    """A job doing wirk in a subprocess."""
+
+    def __init__(self, name, argv, **kwargs):
+        self.argv = argv
+        super().__init__(name, **kwargs)
+
+    async def __call__(self, scheduler):
+        result = await super().__call__(scheduler)
+        async with scheduler.reserved_worker():
+            proc = await asyncio.create_subprocess_exec(*self.argv)
+            try:
+                retcode = await proc.wait()
+            except asyncio.CancelledError:
+                logger.error(f'Terminating {proc}!…')
+                proc.terminate()
+                retcode = await proc.wait()
+            if retcode:
+                raise subprocess.CalledProcessError(retcode, self.argv)
+        return result
+
+
 class TScheduler(SignalHandingScheduler, SchedulerWithWorkers):
     pass
 
@@ -85,7 +108,7 @@ def scheduler(request):
 @contextmanager
 def abort_in(when=0):
     def handle_SIGALRM(signal_number, stack_frame):
-        logger.warning('Raising SIGINT to simulate Ctrl+C...')
+        logger.warning('Raising SIGINT to simulate Ctrl+C…')
         os.kill(os.getpid(), signal.SIGINT)
 
     prev_handler = signal.signal(signal.SIGALRM, handle_SIGALRM)
@@ -123,6 +146,7 @@ def assert_tasks(tasks, expects):
     for job_name in tasks.keys() & expects.keys():
         expect = expects[job_name]
         task = tasks[job_name]
+        logger.debug(f'Inspecting {task}')
         if expect is Cancelled:
             assert task.cancelled()
         elif isinstance(expect, Exception):
@@ -280,6 +304,15 @@ def test_abort_one_job(run_jobs):
 
 def test_abort_one_workerjob(run_jobs):
     todo = [TWorkerJob('foo', sleep=0.3)]
+    before = time.time()
+    done = run_jobs(todo, abort_after=0.1)
+    after = time.time()
+    assert after < before + 0.3
+    assert_tasks(done, {'foo': Cancelled})
+
+
+def test_abort_one_subprocessjob(run_jobs):
+    todo = [TProcJob('foo', argv=['sleep', '30'])]
     before = time.time()
     done = run_jobs(todo, abort_after=0.1)
     after = time.time()
