@@ -6,7 +6,12 @@ import pytest
 import signal
 import time
 
-from scheduler import JobWithDeps, JobInWorker, SignalHandingScheduler
+from scheduler import (
+    JobWithDeps,
+    JobInWorker,
+    SchedulerWithWorkers,
+    SignalHandingScheduler,
+)
 
 
 logger = logging.getLogger('test_job')
@@ -67,10 +72,14 @@ class TWorkerJob(JobWithDeps, JobInWorker):
             return self.result
 
 
+class TScheduler(SignalHandingScheduler, SchedulerWithWorkers):
+    pass
+
+
 @pytest.fixture(params=[1, 2, 4])
 def scheduler(request):
     logger.info(f'Creating scheduler with {request.param} worker threads')
-    yield SignalHandingScheduler(workers=request.param)
+    yield TScheduler(workers=request.param)
 
 
 @contextmanager
