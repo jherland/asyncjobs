@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 from contextlib import asynccontextmanager, contextmanager
+from functools import partial
 import logging
 import signal
 import subprocess
@@ -267,27 +268,29 @@ class ExternalWorkScheduler(Scheduler):
 class SignalHandlingScheduler(Scheduler):
     handle_signals = {signal.SIGHUP, signal.SIGTERM, signal.SIGINT}
 
-    def _caught_signal(self, signum, cancel_caller=None):
+    def _caught_signal(self, signum, cancel_task, cancel_jobs=False):
         logger.warning(f'Caught signal {signum}!')
         assert self.running
-        cancelled, total = 0, 0
-        for job_name, task in self.tasks.items():
-            total += 1
-            if not task.done():
-                logger.warning(f'Cancelling job {job_name}…')
-                task.cancel()
-                cancelled += 1
-        logger.warning(f'Cancelled {cancelled}/{total} jobs')
-        if cancel_caller is not None and not cancel_caller.done():
-            logger.warning(f'Cancelling caller task…')
-            cancel_caller.cancel()
+        if cancel_jobs:  # TODO: REMOVE?
+            cancelled, total = 0, 0
+            for job_name, task in self.tasks.items():
+                total += 1
+                if not task.done():
+                    logger.warning(f'Cancelling job {job_name}…')
+                    task.cancel()
+                    cancelled += 1
+            logger.warning(f'Cancelled {cancelled}/{total} jobs')
+        if cancel_task is not None and not cancel_task.done():
+            logger.warning(f'Cancelling task {cancel_task}…')
+            cancel_task.cancel()
 
     @contextmanager
     def _handle_signals(self):
         loop = asyncio.get_running_loop()
         for signum in self.handle_signals:
+            handler = partial(self._caught_signal, signum, current_task())
             loop.add_signal_handler(
-                signum, self._caught_signal, signum, current_task(),
+                signum, partial(loop.call_soon_threadsafe, handler)
             )
         try:
             yield
