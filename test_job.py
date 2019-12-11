@@ -4,7 +4,6 @@ import logging
 import os
 import pytest
 import signal
-import subprocess
 import time
 
 from scheduler import (
@@ -82,16 +81,7 @@ class TProcJob(TJob):
 
     async def __call__(self, scheduler):
         result = await super().__call__(scheduler)
-        async with scheduler.reserve_worker():
-            proc = await asyncio.create_subprocess_exec(*self.argv)
-            try:
-                retcode = await proc.wait()
-            except asyncio.CancelledError:
-                logger.error(f'Terminating {proc}!…')
-                proc.terminate()
-                retcode = await proc.wait()
-            if retcode:
-                raise subprocess.CalledProcessError(retcode, self.argv)
+        await scheduler.run_in_subprocess(self.argv)
         return result
 
 

@@ -3,6 +3,7 @@ import concurrent.futures
 from contextlib import asynccontextmanager, contextmanager
 import logging
 import signal
+import subprocess
 
 
 logger = logging.getLogger('scheduler')
@@ -195,23 +196,23 @@ class ExternalWorkScheduler(Scheduler):
     async def reserve_worker(self):
         """Acquire a worker context where the caller can run its own work."""
         assert self.running
+        logger.debug('acquiring worker semaphore…')
         async with self.worker_sem:
+            logger.debug('acquired worker semaphore')
             yield
+            logger.debug('releasing worker semaphore')
 
     async def call_in_thread(self, func, *args):
         """Call func(*args) in a worker thread and await its result."""
-        assert self.running
         caller = current_task_name()
-        logger.debug(f'{caller} -- acquiring worker semaphore…')
         async with self.reserve_worker():
-            logger.debug(f'{caller} -- acquired worker semaphore')
             if self.worker_threads is None:
                 self.worker_threads = concurrent.futures.ThreadPoolExecutor(
                     max_workers=self.workers,
                     thread_name_prefix='Worker Thread',
                 )
             try:
-                logger.debug(f'{caller} -> awaiting worker thread')
+                logger.debug(f'{caller} -> awaiting worker thread…')
                 result = await asyncio.get_running_loop().run_in_executor(
                     self.worker_threads, func, *args
                 )
@@ -220,6 +221,31 @@ class ExternalWorkScheduler(Scheduler):
             except Exception as e:
                 logger.warning(f'{caller} <- Exception {e} from worker!')
                 raise
+
+    async def run_in_subprocess(self, argv, check=True):
+        """Run a command line in a subprocess and await its exit code."""
+        caller = current_task_name()
+        async with self.reserve_worker():
+            logger.debug(f'{caller} -> starting {argv} in subprocess…')
+            proc = await asyncio.create_subprocess_exec(*argv)
+            try:
+                logger.debug(f'{caller} -- awaiting subprocess…')
+                retcode = await proc.wait()
+            except asyncio.CancelledError:
+                logger.error(f'{caller} cancelled! Terminating {proc}!…')
+                proc.terminate()
+                try:
+                    retcode = await proc.wait()
+                    logger.debug(f'{caller} cancelled! {proc} terminated.')
+                except asyncio.CancelledError:
+                    logger.error(f'{caller} cancelled again! Killing {proc}!…')
+                    proc.kill()
+                    retcode = await proc.wait()
+                    logger.debug(f'{caller} cancelled! {proc} killed.')
+                raise
+        if check and retcode:
+            raise subprocess.CalledProcessError(retcode, argv)
+        return retcode
 
     async def _run_tasks(self, *args, **kwargs):
         self.worker_sem = asyncio.BoundedSemaphore(self.workers)
