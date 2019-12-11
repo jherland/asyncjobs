@@ -35,7 +35,7 @@ class JobInWorker(Job):
         """Call self.do_work() in a worker and wait for its result."""
         await super().__call__(scheduler)
         self.logger.debug(f'Awaiting own work…')
-        result = await scheduler.do_in_worker(self.do_work)
+        result = await scheduler.call_in_thread(self.do_work)
         self.logger.debug(f'Awaited own work: {result}')
         return result
 
@@ -81,6 +81,8 @@ def current_task_name():
 
 
 class Scheduler:
+    """Async job scheduler. Run Job instances as concurrent tasks."""
+
     def __init__(self, workers=1):
         self.jobs = {}  # name -> Job
         self.tasks = {}  # name -> Task object, aka. (future) result from job()
@@ -174,7 +176,14 @@ class Scheduler:
         return self.tasks
 
 
-class SchedulerWithWorkers(Scheduler):
+class ExternalWorkScheduler(Scheduler):
+    """Manage jobs whose work is done in threads or subprocesses.
+
+    Extend Scheduler with methods that allow Job instances to perform work in
+    other threads or subprocess, while keeping the number of _concurrent_
+    threads/processes within the given limit.
+    """
+
     def __init__(self, workers=1):
         assert workers > 0
         self.workers = workers
@@ -183,18 +192,18 @@ class SchedulerWithWorkers(Scheduler):
         super().__init__()
 
     @asynccontextmanager
-    async def reserved_worker(self):
+    async def reserve_worker(self):
         """Acquire a worker context where the caller can run its own work."""
         assert self.running
         async with self.worker_sem:
             yield
 
-    async def do_in_worker(self, func, *args):
+    async def call_in_thread(self, func, *args):
         """Call func(*args) in a worker thread and await its result."""
         assert self.running
         caller = current_task_name()
         logger.debug(f'{caller} -- acquiring worker semaphore…')
-        async with self.reserved_worker():
+        async with self.reserve_worker():
             logger.debug(f'{caller} -- acquired worker semaphore')
             if self.worker_threads is None:
                 self.worker_threads = concurrent.futures.ThreadPoolExecutor(
@@ -229,7 +238,7 @@ class SchedulerWithWorkers(Scheduler):
                 self.worker_threads = None
 
 
-class SignalHandingScheduler(Scheduler):
+class SignalHandlingScheduler(Scheduler):
     handle_signals = {signal.SIGHUP, signal.SIGTERM, signal.SIGINT}
 
     def _caught_signal(self, signum, cancel_caller=None):

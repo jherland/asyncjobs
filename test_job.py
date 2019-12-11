@@ -10,8 +10,8 @@ import time
 from scheduler import (
     JobWithDeps,
     JobInWorker,
-    SchedulerWithWorkers,
-    SignalHandingScheduler,
+    ExternalWorkScheduler,
+    SignalHandlingScheduler,
 )
 
 
@@ -82,7 +82,7 @@ class TProcJob(TJob):
 
     async def __call__(self, scheduler):
         result = await super().__call__(scheduler)
-        async with scheduler.reserved_worker():
+        async with scheduler.reserve_worker():
             proc = await asyncio.create_subprocess_exec(*self.argv)
             try:
                 retcode = await proc.wait()
@@ -95,7 +95,7 @@ class TProcJob(TJob):
         return result
 
 
-class TScheduler(SignalHandingScheduler, SchedulerWithWorkers):
+class TScheduler(SignalHandlingScheduler, ExternalWorkScheduler):
     pass
 
 
