@@ -7,7 +7,7 @@ import signal
 import time
 
 from scheduler import (
-    JobWithDeps,
+    Job,
     JobInWorker,
     ExternalWorkScheduler,
     SignalHandlingScheduler,
@@ -17,7 +17,7 @@ from scheduler import (
 logger = logging.getLogger('test_job')
 
 
-class TJob(JobWithDeps):
+class TJob(Job):
     """A job with test instrumentation."""
 
     def __init__(self, name, deps=None, *, result=None, before=None, asleep=0):
@@ -43,7 +43,7 @@ class TJob(JobWithDeps):
             return self.result
 
 
-class TWorkerJob(JobWithDeps, JobInWorker):
+class TWorkerJob(JobInWorker):
     """A job done in a worker, with test instrumentation."""
 
     def __init__(self, name, deps=None, *, result=None, before=None, sleep=0):
