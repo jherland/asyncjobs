@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import contextmanager
+from functools import partial
 import logging
 import os
 import pytest
@@ -19,72 +20,90 @@ logger = logging.getLogger('test_job')
 class TJob(Job):
     """A job with test instrumentation."""
 
-    def __init__(self, name, deps=None, *, result=None, before=None, asleep=0):
+    def __init__(
+        self,
+        name,
+        deps=None,
+        *,
+        result=None,
+        before=None,
+        async_sleep=0,
+        thread_sleep=0,
+        subproc_sleep=0,
+        call_in_thread=None,
+        run_in_subprocess=None,
+    ):
+        super().__init__(name=name, deps=deps)
         self.result = '{} done'.format(name) if result is None else result
-        self.before = set() if before is None else before
-        self.asleep = asleep
-        super().__init__(name=name, deps=deps or set())
+        self.before = set() if before is None else set(before)
+        self.async_sleep = async_sleep
+        self.thread_sleep = thread_sleep
+        self.subproc_sleep = subproc_sleep
+        self.call_in_thread = call_in_thread
+        self.run_in_subprocess = run_in_subprocess
 
     async def __call__(self, scheduler):
-        await super().__call__(scheduler)
-        if self.asleep:
-            self.logger.info(f'Async sleeping for {self.asleep} seconds…')
-            await asyncio.sleep(self.asleep)
+        dep_results = await super().__call__(scheduler)
+        self.logger.debug(f'Results from deps: {dep_results}')
+
+        thread_result, subproc_result = None, None
+        if self.async_sleep:
+            self.logger.info(f'Async sleep for {self.async_sleep} seconds…')
+            await asyncio.sleep(self.async_sleep)
             self.logger.info(f'Finished async sleep')
+        if self.thread_sleep:
+            self.logger.debug(f'time.sleep({self.thread_sleep}) in thread…')
+            thread_result = await scheduler.call_in_thread(
+                partial(time.sleep, self.thread_sleep)
+            )
+            self.logger.debug(f'Finished thread sleep: {thread_result}')
+        if self.subproc_sleep:
+            self.logger.debug(f'sleep {self.subproc_sleep} in subprocess…')
+            subproc_result = await scheduler.run_in_subprocess(
+                ['sleep', str(self.subproc_sleep)]
+            )
+            self.logger.debug(f'Finished subproc sleep: {subproc_result}')
+        if self.call_in_thread:
+            self.logger.debug(f'Await call {self.call_in_thread} in thread…')
+            try:
+                thread_result = await scheduler.call_in_thread(
+                    self.call_in_thread
+                )
+            except Exception as e:
+                thread_result = e
+            self.logger.debug(f'Finished thread call: {thread_result}')
+        if self.run_in_subprocess:
+            self.logger.debug(f'Await {self.run_in_subprocess} in subprocess…')
+            try:
+                subproc_result = await scheduler.run_in_subprocess(
+                    self.run_in_subprocess
+                )
+            except Exception as e:
+                subproc_result = e
+            self.logger.debug(f'Finished subprocess call: {subproc_result}')
+
         for b in self.before:
             assert b in scheduler.tasks  # The other job has been started
             assert not scheduler.tasks[b].done()  # but is not yet finished
-        if isinstance(self.result, Exception):
-            self.logger.info(f'Raising {self.result}')
+
+        if isinstance(thread_result, Exception):
+            self.logger.info(f'Raising thread exception: {thread_result}')
+            raise thread_result
+        elif isinstance(subproc_result, Exception):
+            self.logger.info(f'Raising subproc exception: {subproc_result}')
+            raise subproc_result
+        elif isinstance(self.result, Exception):
+            self.logger.info(f'Raising exception: {self.result}')
             raise self.result
+        elif thread_result is not None:
+            self.logger.info(f'Returning thread result: {thread_result}')
+            return thread_result
+        elif subproc_result is not None:
+            self.logger.info(f'Returning subproc result: {subproc_result}')
+            return subproc_result
         else:
-            self.logger.info(f'Returning {self.result}')
+            self.logger.info(f'Returning result: {self.result}')
             return self.result
-
-
-class TWorkerJob(Job):
-    """A job done in a worker, with test instrumentation."""
-
-    def __init__(self, name, deps=None, *, result=None, before=None, sleep=0):
-        self.result = '{} worked'.format(name) if result is None else result
-        self.before = set() if before is None else before
-        self.sleep = sleep
-        super().__init__(name=name, deps=deps or set())
-
-    async def __call__(self, scheduler):
-        await super().__call__(scheduler)
-        self.logger.debug(f'Awaiting own work…')
-        result = await scheduler.call_in_thread(self.do_work)
-        self.logger.debug(f'Awaited own work: {result}')
-        for b in self.before:
-            assert b in scheduler.tasks  # The other job has been started
-            assert not scheduler.tasks[b].done()  # but is not yet finished
-        return result
-
-    def do_work(self):
-        if self.sleep:
-            self.logger.info(f'Sleeping for {self.sleep} seconds…')
-            time.sleep(self.sleep)
-            self.logger.info(f'Finished sleep')
-        if isinstance(self.result, Exception):
-            self.logger.info(f'Raising {self.result}')
-            raise self.result
-        else:
-            self.logger.info(f'Returning {self.result}')
-            return self.result
-
-
-class TProcJob(TJob):
-    """A job doing wirk in a subprocess."""
-
-    def __init__(self, name, argv, **kwargs):
-        self.argv = argv
-        super().__init__(name, **kwargs)
-
-    async def __call__(self, scheduler):
-        result = await super().__call__(scheduler)
-        await scheduler.run_in_subprocess(self.argv)
-        return result
 
 
 class TScheduler(SignalHandlingScheduler, ExternalWorkScheduler):
@@ -252,7 +271,7 @@ def test_one_failed_job_between_two_ok_jobs(run_jobs):
 def test_one_ok_and_one_failed_job_without_keep_going(run_jobs):
     todo = [
         TJob('foo', result=ValueError('UGH')),
-        TJob('bar', asleep=0.01),
+        TJob('bar', async_sleep=0.01),
     ]
     done = run_jobs(todo, keep_going=False)
     assert_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
@@ -261,23 +280,26 @@ def test_one_ok_and_one_failed_job_without_keep_going(run_jobs):
 def test_one_ok_and_one_failed_job_with_keep_going(run_jobs):
     todo = [
         TJob('foo', result=ValueError('UGH')),
-        TJob('bar', asleep=0.01),
+        TJob('bar', async_sleep=0.01),
     ]
     done = run_jobs(todo, keep_going=True)
     assert_tasks(done, {'foo': ValueError('UGH'), 'bar': 'bar done'})
 
 
 def test_one_ok_workerjob(run_jobs):
-    todo = [TWorkerJob('foo')]
+    todo = [TJob('foo', call_in_thread=lambda: 'foo worked')]
     done = run_jobs(todo)
     assert_tasks(done, {'foo': 'foo worked'})
 
 
 def test_one_failed_workerjob_between_two_ok_workerjobs(run_jobs):
+    def raiseUGH():
+        raise ValueError('UGH')
+
     todo = [
-        TWorkerJob('foo', before={'bar'}),
-        TWorkerJob('bar', {'foo'}, before={'baz'}, result=ValueError('UGH')),
-        TWorkerJob('baz', {'bar'}),
+        TJob('foo', before={'bar'}, call_in_thread=lambda: 'foo worked'),
+        TJob('bar', {'foo'}, before={'baz'}, call_in_thread=raiseUGH),
+        TJob('baz', {'bar'}),
     ]
     done = run_jobs(todo)
     assert_tasks(
@@ -286,7 +308,7 @@ def test_one_failed_workerjob_between_two_ok_workerjobs(run_jobs):
 
 
 def test_abort_one_job(run_jobs):
-    todo = [TJob('foo', asleep=0.3)]
+    todo = [TJob('foo', async_sleep=0.3)]
     before = time.time()
     done = run_jobs(todo, abort_after=0.1)
     after = time.time()
@@ -294,8 +316,8 @@ def test_abort_one_job(run_jobs):
     assert_tasks(done, {'foo': Cancelled})
 
 
-def test_abort_one_workerjob(run_jobs):
-    todo = [TWorkerJob('foo', sleep=0.3)]
+def test_abort_one_job_in_thread(run_jobs):
+    todo = [TJob('foo', thread_sleep=0.3)]
     before = time.time()
     done = run_jobs(todo, abort_after=0.1)
     after = time.time()
@@ -303,8 +325,8 @@ def test_abort_one_workerjob(run_jobs):
     assert_tasks(done, {'foo': Cancelled})
 
 
-def test_abort_one_subprocessjob(run_jobs):
-    todo = [TProcJob('foo', argv=['sleep', '30'])]
+def test_abort_one_job_in_subprocess(run_jobs):
+    todo = [TJob('foo', subproc_sleep=30)]
     before = time.time()
     done = run_jobs(todo, abort_after=0.1)
     after = time.time()
