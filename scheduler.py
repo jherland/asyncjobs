@@ -94,7 +94,14 @@ def current_task_name():
 
 
 class Scheduler:
-    """Async job scheduler. Run Job instances as concurrent tasks."""
+    """Async job scheduler. Run Job instances as concurrent tasks.
+
+    Jobs are added by passing Job instances to .add(). These will be scheduled
+    for execution when .run() is called. While running, jobs may await each
+    other's results (by calling .results()). Further jobs may be added (with
+    .add()). When all jobs are completed (with or without success), .run() will
+    return dictionary with all the job results.
+    """
 
     def __init__(self, workers=1):
         self.jobs = {}  # name -> Job
@@ -116,7 +123,7 @@ class Scheduler:
         """Add a job to be run.
 
         If we're already running (i.e. inside .run()) schedule the job
-        immediately, otherwise the job will be scheduled by .run().
+        immediately, otherwise the job will be scheduled when .run() is called.
         Raise ValueError if a job with the same name has already been added.
         """
         if job.name in self.jobs:
@@ -206,7 +213,13 @@ class ExternalWorkScheduler(Scheduler):
 
     @asynccontextmanager
     async def reserve_worker(self):
-        """Acquire a worker context where the caller can run its own work."""
+        """Acquire a worker context where the caller can run its own work.
+
+        This is the mechanism that ensures we do not schedule more concurrent
+        work than allowed by .workers. Anybody that wants to spin off another
+        thread or process to perform some work should use this context manager
+        to await a free "slot".
+        """
         assert self.running
         logger.debug('acquiring worker semaphore…')
         async with self.worker_sem:
@@ -277,6 +290,13 @@ class ExternalWorkScheduler(Scheduler):
 
 
 class SignalHandlingScheduler(Scheduler):
+    """Teach Scheduler to cancel/abort properly on incoming signals.
+
+    This installs appropriate signal handler to intercept SIGHUP, SIGTERM and
+    SIGINT (aka. Ctrl+C or KeyboardInterrupt) and cause them to cancel and
+    clean up the Scheduler and its jobs in an orderly manner.
+    """
+
     handle_signals = {signal.SIGHUP, signal.SIGTERM, signal.SIGINT}
 
     def _caught_signal(self, signum, cancel_task, cancel_jobs=False):
