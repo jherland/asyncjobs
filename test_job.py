@@ -4,6 +4,7 @@ from functools import partial
 import logging
 import os
 import pytest
+from subprocess import CalledProcessError
 import signal
 import time
 
@@ -286,25 +287,52 @@ def test_one_ok_and_one_failed_job_with_keep_going(run_jobs):
     assert_tasks(done, {'foo': ValueError('UGH'), 'bar': 'bar done'})
 
 
-def test_one_ok_workerjob(run_jobs):
+def test_one_ok_job_in_thread(run_jobs):
     todo = [TJob('foo', call_in_thread=lambda: 'foo worked')]
     done = run_jobs(todo)
     assert_tasks(done, {'foo': 'foo worked'})
 
 
-def test_one_failed_workerjob_between_two_ok_workerjobs(run_jobs):
+def test_one_ok_job_in_subproc(run_jobs, tmp_path):
+    path = tmp_path / 'foo'
+    todo = [TJob('foo', run_in_subprocess=['touch', str(path)])]
+    done = run_jobs(todo)
+    assert_tasks(done, {'foo': 0})
+    assert path.is_file()
+
+
+def test_one_failed_between_two_ok_jobs_in_threads(run_jobs):
     def raiseUGH():
         raise ValueError('UGH')
 
     todo = [
         TJob('foo', before={'bar'}, call_in_thread=lambda: 'foo worked'),
         TJob('bar', {'foo'}, before={'baz'}, call_in_thread=raiseUGH),
-        TJob('baz', {'bar'}),
+        TJob('baz', {'bar'}, call_in_thread=lambda: 'baz worked'),
     ]
     done = run_jobs(todo)
     assert_tasks(
         done, {'foo': 'foo worked', 'bar': ValueError('UGH'), 'baz': Cancelled}
     )
+
+
+def test_one_failed_between_two_ok_jobs_in_subprocs(run_jobs, tmp_path):
+    foo_path = tmp_path / 'foo'
+    baz_path = tmp_path / 'baz'
+    todo = [
+        TJob(
+            'foo', before={'bar'}, run_in_subprocess=['touch', str(foo_path)]
+        ),
+        TJob('bar', {'foo'}, before={'baz'}, run_in_subprocess=['false']),
+        TJob('baz', {'bar'}, run_in_subprocess=['touch', str(baz_path)]),
+    ]
+    done = run_jobs(todo)
+    assert_tasks(
+        done,
+        {'foo': 0, 'bar': CalledProcessError(1, ['false']), 'baz': Cancelled},
+    )
+    assert foo_path.is_file()
+    assert not baz_path.exists()
 
 
 def test_abort_one_job(run_jobs):
@@ -325,7 +353,7 @@ def test_abort_one_job_in_thread(run_jobs):
     assert_tasks(done, {'foo': Cancelled})
 
 
-def test_abort_one_job_in_subprocess(run_jobs):
+def test_abort_one_job_in_subproc(run_jobs):
     todo = [TJob('foo', subproc_sleep=30)]
     before = time.time()
     done = run_jobs(todo, abort_after=0.1)
