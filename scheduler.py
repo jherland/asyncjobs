@@ -76,22 +76,6 @@ class Job:
         return {}
 
 
-class JobInWorker(Job):
-    """A Job where the actual work is done in a worker."""
-
-    async def __call__(self, scheduler):
-        """Call self.do_work() in a worker and wait for its result."""
-        await super().__call__(scheduler)
-        self.logger.debug(f'Awaiting own work…')
-        result = await scheduler.call_in_thread(self.do_work)
-        self.logger.debug(f'Awaited own work: {result}')
-        return result
-
-    def do_work(self):
-        """Actual work to be performed here."""
-        pass
-
-
 def current_task():
     if hasattr(asyncio, 'current_task'):  # Added in Python v3.7
         return asyncio.current_task()

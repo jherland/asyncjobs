@@ -8,7 +8,6 @@ import time
 
 from scheduler import (
     Job,
-    JobInWorker,
     ExternalWorkScheduler,
     SignalHandlingScheduler,
 )
@@ -29,21 +28,21 @@ class TJob(Job):
     async def __call__(self, scheduler):
         await super().__call__(scheduler)
         if self.asleep:
-            logger.info(f'Async sleeping for {self.asleep} seconds…')
+            self.logger.info(f'Async sleeping for {self.asleep} seconds…')
             await asyncio.sleep(self.asleep)
-            logger.info(f'Finished async sleep')
+            self.logger.info(f'Finished async sleep')
         for b in self.before:
             assert b in scheduler.tasks  # The other job has been started
             assert not scheduler.tasks[b].done()  # but is not yet finished
         if isinstance(self.result, Exception):
-            logger.info(f'Raising {self.result}')
+            self.logger.info(f'Raising {self.result}')
             raise self.result
         else:
-            logger.info(f'Returning {self.result}')
+            self.logger.info(f'Returning {self.result}')
             return self.result
 
 
-class TWorkerJob(JobInWorker):
+class TWorkerJob(Job):
     """A job done in a worker, with test instrumentation."""
 
     def __init__(self, name, deps=None, *, result=None, before=None, sleep=0):
@@ -53,7 +52,10 @@ class TWorkerJob(JobInWorker):
         super().__init__(name=name, deps=deps or set())
 
     async def __call__(self, scheduler):
-        result = await super().__call__(scheduler)
+        await super().__call__(scheduler)
+        self.logger.debug(f'Awaiting own work…')
+        result = await scheduler.call_in_thread(self.do_work)
+        self.logger.debug(f'Awaited own work: {result}')
         for b in self.before:
             assert b in scheduler.tasks  # The other job has been started
             assert not scheduler.tasks[b].done()  # but is not yet finished
@@ -61,14 +63,14 @@ class TWorkerJob(JobInWorker):
 
     def do_work(self):
         if self.sleep:
-            logger.info(f'Sleeping for {self.sleep} seconds…')
+            self.logger.info(f'Sleeping for {self.sleep} seconds…')
             time.sleep(self.sleep)
-            logger.info(f'Finished sleep')
+            self.logger.info(f'Finished sleep')
         if isinstance(self.result, Exception):
-            logger.info(f'Raising {self.result}')
+            self.logger.info(f'Raising {self.result}')
             raise self.result
         else:
-            logger.info(f'Returning {self.result}')
+            self.logger.info(f'Returning {self.result}')
             return self.result
 
 
