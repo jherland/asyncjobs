@@ -145,6 +145,16 @@ def run_jobs(scheduler):
     return _run_jobs
 
 
+@contextmanager
+def assert_elapsed_time_within(time_limit):
+    before = time.time()
+    try:
+        yield
+    finally:
+        after = time.time()
+        assert after < before + time_limit
+
+
 def assert_all_ok(tasks, jobs):
     assert len(jobs) == len(tasks)
     for job in jobs:
@@ -337,44 +347,34 @@ def test_one_failed_between_two_ok_jobs_in_subprocs(run_jobs, tmp_path):
 
 def test_abort_one_job(run_jobs):
     todo = [TJob('foo', async_sleep=0.3)]
-    before = time.time()
-    done = run_jobs(todo, abort_after=0.1)
-    after = time.time()
-    assert after < before + 0.3
+    with assert_elapsed_time_within(0.3):
+        done = run_jobs(todo, abort_after=0.1)
     assert_tasks(done, {'foo': Cancelled})
 
 
 def test_abort_one_job_in_thread(run_jobs):
     todo = [TJob('foo', thread_sleep=0.3)]
-    before = time.time()
-    done = run_jobs(todo, abort_after=0.1)
-    after = time.time()
-    assert after < before + 0.3
+    with assert_elapsed_time_within(0.3):
+        done = run_jobs(todo, abort_after=0.1)
     assert_tasks(done, {'foo': Cancelled})
 
 
 def test_abort_one_job_in_subproc(run_jobs):
     todo = [TJob('foo', subproc_sleep=30)]
-    before = time.time()
-    done = run_jobs(todo, abort_after=0.1)
-    after = time.time()
-    assert after < before + 0.3
+    with assert_elapsed_time_within(0.3):
+        done = run_jobs(todo, abort_after=0.1)
     assert_tasks(done, {'foo': Cancelled})
 
 
 def test_abort_hundred_jobs_in_threads(run_jobs):
     todo = [TJob(f'foo #{i}', thread_sleep=0.3) for i in range(100)]
-    before = time.time()
-    done = run_jobs(todo, abort_after=0.1)
-    after = time.time()
-    assert after < before + 0.3
+    with assert_elapsed_time_within(0.3):
+        done = run_jobs(todo, abort_after=0.1)
     assert_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
 
 
 def test_abort_hundred_jobs_in_subprocs(run_jobs):
     todo = [TJob(f'foo #{i}', subproc_sleep=30) for i in range(100)]
-    before = time.time()
-    done = run_jobs(todo, abort_after=0.1)
-    after = time.time()
-    assert after < before + 0.5
+    with assert_elapsed_time_within(0.5):
+        done = run_jobs(todo, abort_after=0.1)
     assert_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
