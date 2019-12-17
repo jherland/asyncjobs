@@ -1,13 +1,11 @@
 import asyncio
-from contextlib import contextmanager
 from functools import partial
 import logging
-import os
 import pytest
 from subprocess import CalledProcessError
-import signal
 import time
 
+from conftest import abort_in, assert_elapsed_time_within
 from scheduler import (
     Job,
     ExternalWorkScheduler,
@@ -117,23 +115,6 @@ def scheduler(request):
     yield TScheduler(workers=request.param)
 
 
-@contextmanager
-def abort_in(when=0):
-    def handle_SIGALRM(signal_number, stack_frame):
-        logger.warning('Raising SIGINT to simulate Ctrl+C…')
-        os.kill(os.getpid(), signal.SIGINT)
-
-    prev_handler = signal.signal(signal.SIGALRM, handle_SIGALRM)
-    signal.setitimer(signal.ITIMER_REAL, when)
-    try:
-        yield
-    except KeyboardInterrupt:
-        logger.error('SIGINT/KeyboardInterrupt escaped the context!')
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, prev_handler)
-
-
 @pytest.fixture
 def run_jobs(scheduler):
     def _run_jobs(jobs, abort_after=0, **kwargs):
@@ -143,16 +124,6 @@ def run_jobs(scheduler):
             return asyncio.run(scheduler.run(**kwargs), debug=True)
 
     return _run_jobs
-
-
-@contextmanager
-def assert_elapsed_time_within(time_limit):
-    before = time.time()
-    try:
-        yield
-    finally:
-        after = time.time()
-        assert after < before + time_limit
 
 
 def assert_all_ok(tasks, jobs):
