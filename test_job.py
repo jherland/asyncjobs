@@ -111,7 +111,7 @@ class TScheduler(SignalHandlingScheduler, ExternalWorkScheduler):
     pass
 
 
-@pytest.fixture(params=[1, 2, 4])
+@pytest.fixture(params=[1, 2, 4, 100])
 def scheduler(request):
     logger.info(f'Creating scheduler with {request.param} worker threads')
     yield TScheduler(workers=request.param)
@@ -360,3 +360,21 @@ def test_abort_one_job_in_subproc(run_jobs):
     after = time.time()
     assert after < before + 0.3
     assert_tasks(done, {'foo': Cancelled})
+
+
+def test_abort_hundred_jobs_in_threads(run_jobs):
+    todo = [TJob(f'foo #{i}', thread_sleep=0.3) for i in range(100)]
+    before = time.time()
+    done = run_jobs(todo, abort_after=0.1)
+    after = time.time()
+    assert after < before + 0.3
+    assert_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
+
+
+def test_abort_hundred_jobs_in_subprocs(run_jobs):
+    todo = [TJob(f'foo #{i}', subproc_sleep=30) for i in range(100)]
+    before = time.time()
+    done = run_jobs(todo, abort_after=0.1)
+    after = time.time()
+    assert after < before + 0.5
+    assert_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
