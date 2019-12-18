@@ -126,28 +126,46 @@ def run_jobs(scheduler):
     return _run_jobs
 
 
-def assert_all_ok(tasks, jobs):
-    assert len(jobs) == len(tasks)
-    for job in jobs:
-        assert tasks[job.name].result() == job.result
-
-
 Cancelled = object()
 
 
-def assert_tasks(tasks, expects):
-    for job_name in tasks.keys() & expects.keys():
-        expect = expects[job_name]
-        task = tasks[job_name]
-        logger.debug(f'Inspecting {task}')
+def verify_tasks(tasks, expects):
+    errors = 0
+
+    def fail(job_name, expect, actual=None):
+        nonlocal errors
+        if actual is None:
+            logger.error(f'{job_name}: {expect}')
+        else:
+            logger.error(f'{job_name}: expected {expect!r}, actual {actual!r}')
+        errors += 1
+
+    for name in set(tasks.keys()) | set(expects.keys()):
+        try:
+            expect = expects[name]
+            task = tasks[name]
+        except KeyError:
+            e = 'present' if name in expects else 'missing'
+            t = 'present' if name in tasks else 'missing'
+            fail(name, f'{e} in expects, {t} in tasks')
+            continue
         if expect is Cancelled:
-            assert task.cancelled()
+            if not task.cancelled():
+                fail(name, Cancelled, task)
         elif isinstance(expect, Exception):
             e = task.exception()
-            assert isinstance(e, expect.__class__)
-            assert e.args == expect.args
+            if not isinstance(e, expect.__class__):
+                fail(name, expect.__class__, type(e))
+            if e.args != expect.args:
+                fail(name, expect.args, e.args)
         else:
-            assert task.result() == expect
+            if task.result() != expect:
+                fail(name, expect, task.result())
+    return errors == 0
+
+
+def verify_all_jobs_succeeded(tasks, jobs):
+    return verify_tasks(tasks, {job.name: job.result for job in jobs})
 
 
 def test_zero_jobs_does_nothing(run_jobs):
@@ -158,13 +176,13 @@ def test_zero_jobs_does_nothing(run_jobs):
 def test_one_ok_job(run_jobs):
     todo = [TJob('foo')]
     done = run_jobs(todo)
-    assert_all_ok(done, todo)
+    assert verify_all_jobs_succeeded(done, todo)
 
 
 def test_two_independent_ok_jobs(run_jobs):
     todo = [TJob('foo'), TJob('bar')]
     done = run_jobs(todo)
-    assert_all_ok(done, todo)
+    assert verify_all_jobs_succeeded(done, todo)
 
 
 def test_two_dependent_ok_jobs(run_jobs):
@@ -173,7 +191,7 @@ def test_two_dependent_ok_jobs(run_jobs):
         TJob('bar', {'foo'}),
     ]
     done = run_jobs(todo)
-    assert_all_ok(done, todo)
+    assert verify_all_jobs_succeeded(done, todo)
 
 
 def test_cannot_add_second_job_with_same_name(run_jobs):
@@ -202,7 +220,7 @@ def test_one_ok_before_one_failed_job(run_jobs):
         TJob('bar', {'foo'}, result=ValueError('UGH')),
     ]
     done = run_jobs(todo)
-    assert_tasks(done, {'foo': 'foo done', 'bar': ValueError('UGH')})
+    assert verify_tasks(done, {'foo': 'foo done', 'bar': ValueError('UGH')})
 
 
 def test_one_failed_job_before_one_ok_job(run_jobs):
@@ -211,7 +229,7 @@ def test_one_failed_job_before_one_ok_job(run_jobs):
         TJob('bar', {'foo'}),
     ]
     done = run_jobs(todo)
-    assert_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
+    assert verify_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
 
 
 def test_one_failed_job_before_two_ok_jobs(run_jobs):
@@ -221,7 +239,7 @@ def test_one_failed_job_before_two_ok_jobs(run_jobs):
         TJob('baz', {'foo'}),
     ]
     done = run_jobs(todo)
-    assert_tasks(
+    assert verify_tasks(
         done, {'foo': ValueError('UGH'), 'bar': Cancelled, 'baz': Cancelled}
     )
 
@@ -233,7 +251,7 @@ def test_one_failed_job_before_one_ok_job_before_one_ok_job(run_jobs):
         TJob('baz', {'bar'}),
     ]
     done = run_jobs(todo)
-    assert_tasks(
+    assert verify_tasks(
         done, {'foo': ValueError('UGH'), 'bar': Cancelled, 'baz': Cancelled}
     )
 
@@ -245,7 +263,7 @@ def test_one_failed_job_between_two_ok_jobs(run_jobs):
         TJob('baz', {'bar'}),
     ]
     done = run_jobs(todo)
-    assert_tasks(
+    assert verify_tasks(
         done, {'foo': 'foo done', 'bar': ValueError('UGH'), 'baz': Cancelled}
     )
 
@@ -256,7 +274,7 @@ def test_one_ok_and_one_failed_job_without_keep_going(run_jobs):
         TJob('bar', async_sleep=0.01),
     ]
     done = run_jobs(todo, keep_going=False)
-    assert_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
+    assert verify_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
 
 
 def test_one_ok_and_one_failed_job_with_keep_going(run_jobs):
@@ -265,20 +283,20 @@ def test_one_ok_and_one_failed_job_with_keep_going(run_jobs):
         TJob('bar', async_sleep=0.01),
     ]
     done = run_jobs(todo, keep_going=True)
-    assert_tasks(done, {'foo': ValueError('UGH'), 'bar': 'bar done'})
+    assert verify_tasks(done, {'foo': ValueError('UGH'), 'bar': 'bar done'})
 
 
 def test_one_ok_job_in_thread(run_jobs):
     todo = [TJob('foo', call_in_thread=lambda: 'foo worked')]
     done = run_jobs(todo)
-    assert_tasks(done, {'foo': 'foo worked'})
+    assert verify_tasks(done, {'foo': 'foo worked'})
 
 
 def test_one_ok_job_in_subproc(run_jobs, tmp_path):
     path = tmp_path / 'foo'
     todo = [TJob('foo', run_in_subprocess=['touch', str(path)])]
     done = run_jobs(todo)
-    assert_tasks(done, {'foo': 0})
+    assert verify_tasks(done, {'foo': 0})
     assert path.is_file()
 
 
@@ -292,7 +310,7 @@ def test_one_failed_between_two_ok_jobs_in_threads(run_jobs):
         TJob('baz', {'bar'}, call_in_thread=lambda: 'baz worked'),
     ]
     done = run_jobs(todo)
-    assert_tasks(
+    assert verify_tasks(
         done, {'foo': 'foo worked', 'bar': ValueError('UGH'), 'baz': Cancelled}
     )
 
@@ -308,7 +326,7 @@ def test_one_failed_between_two_ok_jobs_in_subprocs(run_jobs, tmp_path):
         TJob('baz', {'bar'}, run_in_subprocess=['touch', str(baz_path)]),
     ]
     done = run_jobs(todo)
-    assert_tasks(
+    assert verify_tasks(
         done,
         {'foo': 0, 'bar': CalledProcessError(1, ['false']), 'baz': Cancelled},
     )
@@ -320,32 +338,32 @@ def test_abort_one_job(run_jobs):
     todo = [TJob('foo', async_sleep=0.3)]
     with assert_elapsed_time_within(0.3):
         done = run_jobs(todo, abort_after=0.1)
-    assert_tasks(done, {'foo': Cancelled})
+    assert verify_tasks(done, {'foo': Cancelled})
 
 
 def test_abort_one_job_in_thread(run_jobs):
     todo = [TJob('foo', thread_sleep=0.3)]
     with assert_elapsed_time_within(0.3):
         done = run_jobs(todo, abort_after=0.1)
-    assert_tasks(done, {'foo': Cancelled})
+    assert verify_tasks(done, {'foo': Cancelled})
 
 
 def test_abort_one_job_in_subproc(run_jobs):
     todo = [TJob('foo', subproc_sleep=30)]
     with assert_elapsed_time_within(0.3):
         done = run_jobs(todo, abort_after=0.1)
-    assert_tasks(done, {'foo': Cancelled})
+    assert verify_tasks(done, {'foo': Cancelled})
 
 
 def test_abort_hundred_jobs_in_threads(run_jobs):
     todo = [TJob(f'foo #{i}', thread_sleep=0.3) for i in range(100)]
     with assert_elapsed_time_within(0.3):
         done = run_jobs(todo, abort_after=0.1)
-    assert_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
+    assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
 
 
 def test_abort_hundred_jobs_in_subprocs(run_jobs):
     todo = [TJob(f'foo #{i}', subproc_sleep=30) for i in range(100)]
     with assert_elapsed_time_within(0.5):
         done = run_jobs(todo, abort_after=0.1)
-    assert_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
+    assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
