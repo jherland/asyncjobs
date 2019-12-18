@@ -103,7 +103,7 @@ class Scheduler:
     return dictionary with all the job results.
     """
 
-    def __init__(self, workers=1):
+    def __init__(self):
         self.jobs = {}  # name -> Job
         self.tasks = {}  # name -> Task object, aka. (future) result from job()
         self.running = False
@@ -204,7 +204,7 @@ class ExternalWorkScheduler(Scheduler):
     threads/processes within the given limit.
     """
 
-    def __init__(self, workers=1):
+    def __init__(self, *, workers=1):
         assert workers > 0
         self.workers = workers
         self.worker_sem = None
@@ -250,6 +250,7 @@ class ExternalWorkScheduler(Scheduler):
     async def run_in_subprocess(self, argv, check=True):
         """Run a command line in a subprocess and await its exit code."""
         caller = current_task_name()
+        retcode = None
         async with self.reserve_worker():
             logger.debug(f'{caller} -> starting {argv} in subprocess…')
             proc = await asyncio.create_subprocess_exec(*argv)
@@ -268,7 +269,7 @@ class ExternalWorkScheduler(Scheduler):
                     retcode = await proc.wait()
                     logger.debug(f'{caller} cancelled! {proc} killed.')
                 raise
-        if check and retcode:
+        if check and retcode != 0:
             raise subprocess.CalledProcessError(retcode, argv)
         return retcode
 
