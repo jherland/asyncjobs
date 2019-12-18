@@ -5,6 +5,7 @@ from functools import partial
 import logging
 import signal
 import subprocess
+import time
 
 
 logger = logging.getLogger('scheduler')
@@ -93,6 +94,18 @@ def current_task_name():
         return None
 
 
+def fate(future):
+    """Return a word describing the state of the given future."""
+    if not future.done():
+        return 'unfinished'
+    elif future.cancelled():
+        return 'cancelled'
+    elif future.exception() is not None:
+        return 'failed'
+    else:
+        return 'success'
+
+
 class Scheduler:
     """Async job scheduler. Run Job instances as concurrent tasks.
 
@@ -103,10 +116,25 @@ class Scheduler:
     return dictionary with all the job results.
     """
 
-    def __init__(self):
+    def __init__(self, *, event_handler=None):
         self.jobs = {}  # name -> Job
         self.tasks = {}  # name -> Task object, aka. (future) result from job()
         self.running = False
+        self.event_handler = event_handler
+
+    def event(self, event, job_name=None, info=None):
+        if self.event_handler is None:
+            return
+        d = {'timestamp': time.time(), 'event': event}
+        if job_name is not None:
+            d['job'] = job_name
+        if info is not None:
+            d.update(info)
+        logger.debug(f'Posting event: {d}')
+        try:
+            self.event_handler(d)
+        except asyncio.QueueFull:
+            logger.error('Failed to post event: {d}')
 
     def _start_job(self, job):
         if hasattr(asyncio.Task, 'get_name'):  # Added in Python v3.8
@@ -117,7 +145,11 @@ class Scheduler:
             task = asyncio.ensure_future(job(self))
             task.job_name = job.name
             self.tasks[job.name] = task
-        #  logger.info(f'{job} started')
+        self.event('start', job.name)
+
+        self.tasks[job.name].add_done_callback(
+            lambda task: self.event('finish', job.name, {'fate': fate(task)})
+        )
 
     def add(self, job):
         """Add a job to be run.
@@ -130,7 +162,7 @@ class Scheduler:
             exist = self.jobs[job.name]
             raise ValueError(f'Cannot add {job} with same name as {exist}')
         self.jobs[job.name] = job
-        #  logger.info(f'{job} added')
+        self.event('add', job.name)
         if self.running:
             self._start_job(job)
 
@@ -147,6 +179,11 @@ class Scheduler:
         caller = current_task_name()
         tasks = [self.tasks[n] for n in job_names]
         pending = [n for n, t in zip(job_names, tasks) if not t.done()]
+        self.event(
+            'await results',
+            caller,
+            {'jobs': list(job_names), 'pending': pending},
+        )
         if pending:
             logger.debug(f'{caller} is waiting for {", ".join(pending)}…')
         try:
@@ -154,12 +191,17 @@ class Scheduler:
         except Exception:
             logger.info(f'{caller} cancelled due to failure(s) in {job_names}')
             raise concurrent.futures.CancelledError
+        self.event('awaited results', caller)
         logger.debug(f'{caller} <- {results} from .results()')
         return results
 
     async def _run_tasks(self, return_when):
         logger.info(f'Waiting for all jobs to complete…')
-        await asyncio.wait(self.tasks.values(), return_when=return_when)
+        self.event('await tasks', info={'jobs': list(self.tasks.keys())})
+        try:
+            await asyncio.wait(self.tasks.values(), return_when=return_when)
+        finally:
+            self.event('awaited tasks')
 
     async def run(self, keep_going=False):
         """Run until all jobs are finished.
@@ -177,6 +219,10 @@ class Scheduler:
         or cancelled state).
         """
         logger.debug('Running…')
+        self.event(
+            'start',
+            info={'keep_going': keep_going, 'num_jobs': len(self.jobs)},
+        )
         if keep_going:
             return_when = concurrent.futures.ALL_COMPLETED
         else:
@@ -193,6 +239,7 @@ class Scheduler:
         await self._run_tasks(return_when)
         self.running = False
 
+        self.event('finish', info={'num_tasks': len(self.tasks)})
         return self.tasks
 
 
@@ -204,15 +251,15 @@ class ExternalWorkScheduler(Scheduler):
     threads/processes within the given limit.
     """
 
-    def __init__(self, *, workers=1):
+    def __init__(self, *, workers=1, **kwargs):
         assert workers > 0
         self.workers = workers
         self.worker_sem = None
         self.worker_threads = None
-        super().__init__()
+        super().__init__(**kwargs)
 
     @asynccontextmanager
-    async def reserve_worker(self):
+    async def reserve_worker(self, caller=None):
         """Acquire a worker context where the caller can run its own work.
 
         This is the mechanism that ensures we do not schedule more concurrent
@@ -222,7 +269,9 @@ class ExternalWorkScheduler(Scheduler):
         """
         assert self.running
         logger.debug('acquiring worker semaphore…')
+        self.event('await worker slot', caller)
         async with self.worker_sem:
+            self.event('awaited worker slot', caller)
             logger.debug('acquired worker semaphore')
             yield
             logger.debug('releasing worker semaphore')
@@ -230,7 +279,7 @@ class ExternalWorkScheduler(Scheduler):
     async def call_in_thread(self, func, *args):
         """Call func(*args) in a worker thread and await its result."""
         caller = current_task_name()
-        async with self.reserve_worker():
+        async with self.reserve_worker(caller):
             if self.worker_threads is None:
                 self.worker_threads = concurrent.futures.ThreadPoolExecutor(
                     max_workers=self.workers,
@@ -238,9 +287,16 @@ class ExternalWorkScheduler(Scheduler):
                 )
             try:
                 logger.debug(f'{caller} -> awaiting worker thread…')
-                result = await asyncio.get_running_loop().run_in_executor(
+                self.event('await worker thread', caller, {'func': str(func)})
+                future = asyncio.get_running_loop().run_in_executor(
                     self.worker_threads, func, *args
                 )
+                future.add_done_callback(
+                    lambda f: self.event(
+                        'awaited worker thread', caller, {'fate': fate(f)}
+                    )
+                )
+                result = await future
                 logger.debug(f'{caller} <- {result} from worker')
                 return result
             except Exception as e:
@@ -251,8 +307,9 @@ class ExternalWorkScheduler(Scheduler):
         """Run a command line in a subprocess and await its exit code."""
         caller = current_task_name()
         retcode = None
-        async with self.reserve_worker():
+        async with self.reserve_worker(caller):
             logger.debug(f'{caller} -> starting {argv} in subprocess…')
+            self.event('await worker proc', caller, {'argv': argv})
             proc = await asyncio.create_subprocess_exec(*argv)
             try:
                 logger.debug(f'{caller} -- awaiting subprocess…')
@@ -269,6 +326,8 @@ class ExternalWorkScheduler(Scheduler):
                     retcode = await proc.wait()
                     logger.debug(f'{caller} cancelled! {proc} killed.')
                 raise
+            finally:
+                self.event('awaited worker proc', caller, {'exit': retcode})
         if check and retcode != 0:
             raise subprocess.CalledProcessError(retcode, argv)
         return retcode

@@ -15,6 +15,19 @@ from scheduler import (
 
 logger = logging.getLogger('test_job')
 
+# Wildcard used for don't-care values in expected event fields
+Whatever = object()
+
+
+def verify_event(expect, actual):
+    expect_keys = set(expect.keys()) - {'ALLOW_CANCEL'}
+    assert expect_keys == set(actual.keys())
+    keys = sorted(expect_keys)
+    for e, a in zip((expect[k] for k in keys), (actual[k] for k in keys)):
+        if e is not Whatever:
+            assert e == a
+    return True
+
 
 class TJob(Job):
     """A job with test instrumentation."""
@@ -41,8 +54,33 @@ class TJob(Job):
         self.thread = thread
         self.subproc = subproc
 
+        self._expect_events = []
+        self._add_event('add'),
+        self._add_event('start'),
+
+    def _add_event(self, event, *, allow_cancel=False, **kwargs):
+        d = {'event': event, 'job': self.name, 'timestamp': Whatever}
+        d.update(kwargs)
+        if allow_cancel:
+            d['ALLOW_CANCEL'] = True
+        self._expect_events.append(d)
+
+    def expect_events(self):
+        if self._expect_events[-1]['event'] != 'finish':  # we were cancelled
+            self._add_event('finish', fate='cancelled')
+        return self._expect_events
+
     async def __call__(self, scheduler):
+        if self.deps:
+            if self.deps == {'MISSING'}:
+                self._add_event('finish', fate='failed')  # expect KeyError
+            else:
+                self._add_event(
+                    'await results', jobs=list(self.deps), pending=Whatever
+                )
         dep_results = await super().__call__(scheduler)
+        if self.deps:
+            self._add_event('awaited results')
         self.logger.debug(f'Results from deps: {dep_results}')
 
         thread_result, subproc_result = None, None
@@ -52,31 +90,69 @@ class TJob(Job):
             self.logger.info(f'Finished async sleep')
         if self.thread_sleep:
             self.logger.debug(f'time.sleep({self.thread_sleep}) in thread…')
-            thread_result = await scheduler.call_in_thread(
-                partial(time.sleep, self.thread_sleep)
+            self._add_event('await worker slot')
+            self._add_event('awaited worker slot', allow_cancel=True)
+            self._add_event(
+                'await worker thread', allow_cancel=True, func=Whatever
             )
+            try:
+                thread_result = await scheduler.call_in_thread(
+                    partial(time.sleep, self.thread_sleep)
+                )
+                self._add_event('awaited worker thread', fate='success')
+            except asyncio.CancelledError:
+                self._add_event(
+                    'awaited worker thread',
+                    allow_cancel=True,
+                    fate='cancelled',
+                )
+                raise
             self.logger.debug(f'Finished thread sleep: {thread_result}')
         if self.subproc_sleep:
+            argv = ['sleep', str(self.subproc_sleep)]
             self.logger.debug(f'sleep {self.subproc_sleep} in subprocess…')
-            subproc_result = await scheduler.run_in_subprocess(
-                ['sleep', str(self.subproc_sleep)]
-            )
+            self._add_event('await worker slot')
+            self._add_event('awaited worker slot', allow_cancel=True)
+            self._add_event('await worker proc', allow_cancel=True, argv=argv)
+            try:
+                subproc_result = await scheduler.run_in_subprocess(argv)
+                self._add_event('awaited worker proc', exit=0)
+            except asyncio.CancelledError:
+                self._add_event(
+                    'awaited worker proc', allow_cancel=True, exit=-15
+                )
+                raise
             self.logger.debug(f'Finished subproc sleep: {subproc_result}')
         if self.thread:
             self.logger.debug(f'Await call {self.thread} in thread…')
+            self._add_event('await worker slot')
+            self._add_event('awaited worker slot', allow_cancel=True)
+            self._add_event(
+                'await worker thread', allow_cancel=True, func=Whatever
+            )
             try:
                 thread_result = await scheduler.call_in_thread(self.thread)
+                self._add_event('awaited worker thread', fate='success')
             except Exception as e:
                 thread_result = e
+                self._add_event('awaited worker thread', fate='failed')
             self.logger.debug(f'Finished thread call: {thread_result}')
         if self.subproc:
             self.logger.debug(f'Await run {self.subproc} in subprocess…')
+            self._add_event('await worker slot')
+            self._add_event('awaited worker slot', allow_cancel=True)
+            self._add_event(
+                'await worker proc', allow_cancel=True, argv=self.subproc
+            )
             try:
                 subproc_result = await scheduler.run_in_subprocess(
                     self.subproc
                 )
+                self._add_event('awaited worker proc', exit=0)
             except Exception as e:
                 subproc_result = e
+                if isinstance(e, CalledProcessError):
+                    self._add_event('awaited worker proc', exit=e.returncode)
             self.logger.debug(f'Finished subprocess run: {subproc_result}')
 
         for b in self.before:
@@ -85,21 +161,27 @@ class TJob(Job):
 
         if isinstance(thread_result, Exception):
             self.logger.info(f'Raising thread exception: {thread_result}')
+            self._add_event('finish', fate='failed')
             raise thread_result
         elif isinstance(subproc_result, Exception):
             self.logger.info(f'Raising subproc exception: {subproc_result}')
+            self._add_event('finish', fate='failed')
             raise subproc_result
         elif isinstance(self.result, Exception):
             self.logger.info(f'Raising exception: {self.result}')
+            self._add_event('finish', fate='failed')
             raise self.result
         elif thread_result is not None:
             self.logger.info(f'Returning thread result: {thread_result}')
+            self._add_event('finish', fate='success')
             return thread_result
         elif subproc_result is not None:
             self.logger.info(f'Returning subproc result: {subproc_result}')
+            self._add_event('finish', fate='success')
             return subproc_result
         else:
             self.logger.info(f'Returning result: {self.result}')
+            self._add_event('finish', fate='success')
             return self.result
 
 
@@ -114,12 +196,99 @@ def scheduler(request):
 
 
 @pytest.fixture
-def run_jobs(scheduler):
-    def _run_jobs(jobs, abort_after=0, **kwargs):
-        for job in jobs:
+def verify_events(scheduler):
+    actual = []
+    scheduler.event_handler = actual.append
+    before = time.time()
+
+    def _verify_events(todo, done):
+        nonlocal actual, before
+        after = time.time()
+        num_jobs = len(todo)
+        expect = {j.name: j.expect_events() for j in todo}
+
+        # Timestamps are in sorted order and all between 'before' and 'after'
+        timestamps = [e['timestamp'] for e in actual]
+        assert timestamps == sorted(timestamps)
+        assert timestamps[0] >= before
+        assert timestamps[-1] <= after
+
+        # Jobs are added before execution starts
+        expect_adds = [e.pop(0) for e in expect.values()]
+        for e, a in zip(expect_adds, actual[:num_jobs]):
+            assert verify_event(e, a)
+        actual = actual[num_jobs:]
+
+        # Overall execution start and finish
+        overall_start, overall_finish = actual.pop(0), actual.pop()
+        assert verify_event(
+            {
+                'event': 'start',
+                'num_jobs': num_jobs,
+                'keep_going': Whatever,
+                'timestamp': Whatever,
+            },
+            overall_start,
+        )
+        assert verify_event(
+            {
+                'event': 'finish',
+                'num_tasks': len(done),
+                'timestamp': Whatever,
+            },
+            overall_finish,
+        )
+
+        if expect:
+            # Jobs are started
+            expect_starts = [e.pop(0) for e in expect.values()]
+            for e, a in zip(expect_starts, actual[:num_jobs]):
+                assert verify_event(e, a)
+            actual = actual[num_jobs:]
+
+            # Await task execution
+            await_tasks, awaited_tasks = actual.pop(0), actual.pop()
+            assert verify_event(
+                {
+                    'event': 'await tasks',
+                    'jobs': [j.name for j in todo],
+                    'timestamp': Whatever,
+                },
+                await_tasks,
+            )
+            assert verify_event(
+                {'event': 'awaited tasks', 'timestamp': Whatever},
+                awaited_tasks,
+            )
+
+            # Remaining events belong to individual tasks
+            while actual:
+                a = actual.pop(0)
+                job_name = a['job']
+                e = expect[job_name].pop(0)
+                if a['event'] == 'finish' and a['fate'] == 'cancelled':
+                    while e.get('ALLOW_CANCEL', False):
+                        e = expect[job_name].pop(0)
+                assert verify_event(e, a)
+
+            # No more expected events
+            assert all(len(e) == 0 for e in expect.values())
+
+        assert not actual  # no more actual events
+        return True
+
+    return _verify_events
+
+
+@pytest.fixture
+def run_jobs(scheduler, verify_events):
+    def _run_jobs(todo, abort_after=0, **kwargs):
+        for job in todo:
             scheduler.add(job)
         with abort_in(abort_after):
-            return asyncio.run(scheduler.run(**kwargs), debug=True)
+            done = asyncio.run(scheduler.run(**kwargs), debug=True)
+        verify_events(todo, done)
+        return done
 
     return _run_jobs
 
@@ -167,8 +336,7 @@ def verify_all_jobs_succeeded(tasks, jobs):
 
 
 def test_zero_jobs_does_nothing(run_jobs):
-    done = run_jobs([])
-    assert done == {}
+    assert run_jobs([]) == {}
 
 
 # simple async jobs, no threading or subprocesses
