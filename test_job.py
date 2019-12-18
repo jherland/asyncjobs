@@ -29,8 +29,8 @@ class TJob(Job):
         async_sleep=0,
         thread_sleep=0,
         subproc_sleep=0,
-        call_in_thread=None,
-        run_in_subprocess=None,
+        thread=None,
+        subproc=None,
     ):
         super().__init__(name=name, deps=deps)
         self.result = '{} done'.format(name) if result is None else result
@@ -38,8 +38,8 @@ class TJob(Job):
         self.async_sleep = async_sleep
         self.thread_sleep = thread_sleep
         self.subproc_sleep = subproc_sleep
-        self.call_in_thread = call_in_thread
-        self.run_in_subprocess = run_in_subprocess
+        self.thread = thread
+        self.subproc = subproc
 
     async def __call__(self, scheduler):
         dep_results = await super().__call__(scheduler)
@@ -62,24 +62,22 @@ class TJob(Job):
                 ['sleep', str(self.subproc_sleep)]
             )
             self.logger.debug(f'Finished subproc sleep: {subproc_result}')
-        if self.call_in_thread:
-            self.logger.debug(f'Await call {self.call_in_thread} in thread…')
+        if self.thread:
+            self.logger.debug(f'Await call {self.thread} in thread…')
             try:
-                thread_result = await scheduler.call_in_thread(
-                    self.call_in_thread
-                )
+                thread_result = await scheduler.call_in_thread(self.thread)
             except Exception as e:
                 thread_result = e
             self.logger.debug(f'Finished thread call: {thread_result}')
-        if self.run_in_subprocess:
-            self.logger.debug(f'Await {self.run_in_subprocess} in subprocess…')
+        if self.subproc:
+            self.logger.debug(f'Await run {self.subproc} in subprocess…')
             try:
                 subproc_result = await scheduler.run_in_subprocess(
-                    self.run_in_subprocess
+                    self.subproc
                 )
             except Exception as e:
                 subproc_result = e
-            self.logger.debug(f'Finished subprocess call: {subproc_result}')
+            self.logger.debug(f'Finished subprocess run: {subproc_result}')
 
         for b in self.before:
             assert b in scheduler.tasks  # The other job has been started
@@ -173,25 +171,22 @@ def test_zero_jobs_does_nothing(run_jobs):
     assert done == {}
 
 
+# simple async jobs, no threading or subprocesses
+
+
 def test_one_ok_job(run_jobs):
     todo = [TJob('foo')]
     done = run_jobs(todo)
     assert verify_all_jobs_succeeded(done, todo)
 
 
-def test_two_independent_ok_jobs(run_jobs):
-    todo = [TJob('foo'), TJob('bar')]
-    done = run_jobs(todo)
-    assert verify_all_jobs_succeeded(done, todo)
-
-
-def test_two_dependent_ok_jobs(run_jobs):
-    todo = [
-        TJob('foo', before={'bar'}),
-        TJob('bar', {'foo'}),
-    ]
-    done = run_jobs(todo)
-    assert verify_all_jobs_succeeded(done, todo)
+def test_one_failed_job(run_jobs):
+    done = run_jobs([TJob('foo', result=ValueError('UGH'))])
+    assert len(done) == 1
+    e = done['foo'].exception()
+    assert isinstance(e, ValueError) and e.args == ('UGH',)
+    with pytest.raises(ValueError, match='UGH'):
+        done['foo'].result()
 
 
 def test_cannot_add_second_job_with_same_name(run_jobs):
@@ -205,13 +200,19 @@ def test_job_with_nonexisting_dependency_raises_KeyError(run_jobs):
         done['foo'].result()
 
 
-def test_one_failed_job(run_jobs):
-    done = run_jobs([TJob('foo', result=ValueError('UGH'))])
-    assert len(done) == 1
-    e = done['foo'].exception()
-    assert isinstance(e, ValueError) and e.args == ('UGH',)
-    with pytest.raises(ValueError, match='UGH'):
-        done['foo'].result()
+def test_two_independent_ok_jobs(run_jobs):
+    todo = [TJob('foo'), TJob('bar')]
+    done = run_jobs(todo)
+    assert verify_all_jobs_succeeded(done, todo)
+
+
+def test_one_ok_before_another_ok_job(run_jobs):
+    todo = [
+        TJob('foo', before={'bar'}),
+        TJob('bar', {'foo'}),
+    ]
+    done = run_jobs(todo)
+    assert verify_all_jobs_succeeded(done, todo)
 
 
 def test_one_ok_before_one_failed_job(run_jobs):
@@ -223,7 +224,7 @@ def test_one_ok_before_one_failed_job(run_jobs):
     assert verify_tasks(done, {'foo': 'foo done', 'bar': ValueError('UGH')})
 
 
-def test_one_failed_job_before_one_ok_job(run_jobs):
+def test_one_failed_job_before_one_ok_job_cancels_second_job(run_jobs):
     todo = [
         TJob('foo', before={'bar'}, result=ValueError('UGH')),
         TJob('bar', {'foo'}),
@@ -232,7 +233,7 @@ def test_one_failed_job_before_one_ok_job(run_jobs):
     assert verify_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
 
 
-def test_one_failed_job_before_two_ok_jobs(run_jobs):
+def test_one_failed_job_before_two_ok_jobs_cancels_two_jobs(run_jobs):
     todo = [
         TJob('foo', before={'bar', 'baz'}, result=ValueError('UGH')),
         TJob('bar', {'foo'}),
@@ -244,7 +245,7 @@ def test_one_failed_job_before_two_ok_jobs(run_jobs):
     )
 
 
-def test_one_failed_job_before_one_ok_job_before_one_ok_job(run_jobs):
+def test_one_failed_job_before_two_dependent_jobs_cancels_two_jobs(run_jobs):
     todo = [
         TJob('foo', before={'bar'}, result=ValueError('UGH')),
         TJob('bar', {'foo'}, before={'baz'}),
@@ -256,7 +257,7 @@ def test_one_failed_job_before_one_ok_job_before_one_ok_job(run_jobs):
     )
 
 
-def test_one_failed_job_between_two_ok_jobs(run_jobs):
+def test_one_failed_job_between_two_ok_jobs_cancels_last_job(run_jobs):
     todo = [
         TJob('foo', before={'bar'}),
         TJob('bar', {'foo'}, before={'baz'}, result=ValueError('UGH')),
@@ -268,46 +269,49 @@ def test_one_failed_job_between_two_ok_jobs(run_jobs):
     )
 
 
-def test_one_ok_and_one_failed_job_without_keep_going(run_jobs):
+def test_one_ok_and_one_failed_job_without_keep_going_cancels_ok_job(run_jobs):
     todo = [
         TJob('foo', result=ValueError('UGH')),
-        TJob('bar', async_sleep=0.01),
+        TJob('bar', async_sleep=0.01),  # allow time for potential cancellation
     ]
     done = run_jobs(todo, keep_going=False)
     assert verify_tasks(done, {'foo': ValueError('UGH'), 'bar': Cancelled})
 
 
-def test_one_ok_and_one_failed_job_with_keep_going(run_jobs):
+def test_one_ok_and_one_failed_job_with_keep_going_runs_ok_job(run_jobs):
     todo = [
         TJob('foo', result=ValueError('UGH')),
-        TJob('bar', async_sleep=0.01),
+        TJob('bar', async_sleep=0.01),  # allow time for potential cancellation
     ]
     done = run_jobs(todo, keep_going=True)
     assert verify_tasks(done, {'foo': ValueError('UGH'), 'bar': 'bar done'})
 
 
+# jobs with work performed in threads and/or subprocesses
+
+
 def test_one_ok_job_in_thread(run_jobs):
-    todo = [TJob('foo', call_in_thread=lambda: 'foo worked')]
+    todo = [TJob('foo', thread=lambda: 'foo worked')]
     done = run_jobs(todo)
     assert verify_tasks(done, {'foo': 'foo worked'})
 
 
 def test_one_ok_job_in_subproc(run_jobs, tmp_path):
     path = tmp_path / 'foo'
-    todo = [TJob('foo', run_in_subprocess=['touch', str(path)])]
+    todo = [TJob('foo', subproc=['touch', str(path)])]
     done = run_jobs(todo)
     assert verify_tasks(done, {'foo': 0})
     assert path.is_file()
 
 
-def test_one_failed_between_two_ok_jobs_in_threads(run_jobs):
+def test_one_failed_between_two_ok_jobs_in_threads_cancels_last(run_jobs):
     def raiseUGH():
         raise ValueError('UGH')
 
     todo = [
-        TJob('foo', before={'bar'}, call_in_thread=lambda: 'foo worked'),
-        TJob('bar', {'foo'}, before={'baz'}, call_in_thread=raiseUGH),
-        TJob('baz', {'bar'}, call_in_thread=lambda: 'baz worked'),
+        TJob('foo', before={'bar'}, thread=lambda: 'foo worked'),
+        TJob('bar', {'foo'}, before={'baz'}, thread=raiseUGH),
+        TJob('baz', {'bar'}, thread=lambda: 'baz worked'),
     ]
     done = run_jobs(todo)
     assert verify_tasks(
@@ -315,15 +319,13 @@ def test_one_failed_between_two_ok_jobs_in_threads(run_jobs):
     )
 
 
-def test_one_failed_between_two_ok_jobs_in_subprocs(run_jobs, tmp_path):
+def test_one_failed_between_two_in_subprocs_cancels_last(run_jobs, tmp_path):
     foo_path = tmp_path / 'foo'
     baz_path = tmp_path / 'baz'
     todo = [
-        TJob(
-            'foo', before={'bar'}, run_in_subprocess=['touch', str(foo_path)]
-        ),
-        TJob('bar', {'foo'}, before={'baz'}, run_in_subprocess=['false']),
-        TJob('baz', {'bar'}, run_in_subprocess=['touch', str(baz_path)]),
+        TJob('foo', before={'bar'}, subproc=['touch', str(foo_path)]),
+        TJob('bar', {'foo'}, before={'baz'}, subproc=['false']),
+        TJob('baz', {'bar'}, subproc=['touch', str(baz_path)]),
     ]
     done = run_jobs(todo)
     assert verify_tasks(
@@ -334,35 +336,45 @@ def test_one_failed_between_two_ok_jobs_in_subprocs(run_jobs, tmp_path):
     assert not baz_path.exists()
 
 
-def test_abort_one_job(run_jobs):
+# aborting jobs shall properly clean up all jobs + scheduler
+
+
+def test_abort_one_job_returns_immediately(run_jobs):
     todo = [TJob('foo', async_sleep=0.3)]
-    with assert_elapsed_time_within(0.3):
+    with assert_elapsed_time_within(0.2):
         done = run_jobs(todo, abort_after=0.1)
     assert verify_tasks(done, {'foo': Cancelled})
 
 
-def test_abort_one_job_in_thread(run_jobs):
+def test_abort_one_job_in_thread_returns_immediately(run_jobs):
     todo = [TJob('foo', thread_sleep=0.3)]
-    with assert_elapsed_time_within(0.3):
+    with assert_elapsed_time_within(0.2):
         done = run_jobs(todo, abort_after=0.1)
     assert verify_tasks(done, {'foo': Cancelled})
 
 
-def test_abort_one_job_in_subproc(run_jobs):
+def test_abort_one_job_in_subproc_returns_immediately(run_jobs):
     todo = [TJob('foo', subproc_sleep=30)]
     with assert_elapsed_time_within(0.3):
         done = run_jobs(todo, abort_after=0.1)
     assert verify_tasks(done, {'foo': Cancelled})
 
 
-def test_abort_hundred_jobs_in_threads(run_jobs):
-    todo = [TJob(f'foo #{i}', thread_sleep=0.3) for i in range(100)]
-    with assert_elapsed_time_within(0.3):
+def test_abort_hundred_jobs_returns_immediately(run_jobs):
+    todo = [TJob(f'foo #{i}', async_sleep=0.3) for i in range(100)]
+    with assert_elapsed_time_within(0.2):
         done = run_jobs(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
 
 
-def test_abort_hundred_jobs_in_subprocs(run_jobs):
+def test_abort_hundred_jobs_in_threads_returns_immediately(run_jobs):
+    todo = [TJob(f'foo #{i}', thread_sleep=0.3) for i in range(100)]
+    with assert_elapsed_time_within(0.2):
+        done = run_jobs(todo, abort_after=0.1)
+    assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
+
+
+def test_abort_hundred_jobs_in_subprocs_returns_immediately(run_jobs):
     todo = [TJob(f'foo #{i}', subproc_sleep=30) for i in range(100)]
     with assert_elapsed_time_within(0.5):
         done = run_jobs(todo, abort_after=0.1)
