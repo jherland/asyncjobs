@@ -530,20 +530,20 @@ def test_abort_one_job_in_subproc_returns_immediately(run_jobs):
 
 def test_abort_hundred_jobs_returns_immediately(run_jobs):
     todo = [TJob(f'foo #{i}', async_sleep=0.3) for i in range(100)]
-    with assert_elapsed_time_within(0.2):
+    with assert_elapsed_time_within(0.5):
         done = run_jobs(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
 
 
 def test_abort_hundred_jobs_in_threads_returns_immediately(run_jobs):
     todo = [TJob(f'foo #{i}', thread_sleep=0.3) for i in range(100)]
-    with assert_elapsed_time_within(0.2):
+    with assert_elapsed_time_within(0.5):
         done = run_jobs(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
 
 
 def test_abort_hundred_jobs_in_subprocs_returns_immediately(run_jobs):
     todo = [TJob(f'foo #{i}', subproc_sleep=30) for i in range(100)]
-    with assert_elapsed_time_within(0.5):
+    with assert_elapsed_time_within(2.0):
         done = run_jobs(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
