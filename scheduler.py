@@ -238,16 +238,15 @@ class Scheduler:
             return_when = concurrent.futures.FIRST_EXCEPTION
 
         to_start = list(self.jobs.values())
-        if not to_start:
+        if to_start:
+            for job in to_start:
+                self._start_job(job)
+
+            self.running = True
+            await self._run_tasks(return_when)
+            self.running = False
+        else:
             logger.warning('Nothing to do!')
-            return self.tasks
-        for job in to_start:
-            self._start_job(job)
-
-        self.running = True
-        await self._run_tasks(return_when)
-        self.running = False
-
         self.event('finish', info={'num_tasks': len(self.tasks)})
         return self.tasks
 
