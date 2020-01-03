@@ -201,7 +201,16 @@ class Scheduler:
         try:
             await asyncio.wait(self.tasks.values(), return_when=return_when)
         finally:
-            self.event('awaited tasks')
+            # Any tasks left running at this point should be cancelled and
+            # reaped _before_ we return from here
+            for job_name, task in self.tasks.items():
+                if not task.done():
+                    logger.warning(f'Cancelling {job_name}...')
+                    task.cancel()
+            try:
+                await asyncio.wait(self.tasks.values())
+            finally:
+                self.event('awaited tasks')
 
     async def run(self, keep_going=False):
         """Run until all jobs are finished.
