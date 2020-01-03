@@ -331,10 +331,6 @@ def verify_tasks(tasks, expects):
     return errors == 0
 
 
-def verify_all_jobs_succeeded(tasks, jobs):
-    return verify_tasks(tasks, {job.name: job.result for job in jobs})
-
-
 def test_zero_jobs_does_nothing(run_jobs):
     assert run_jobs([]) == {}
 
@@ -345,7 +341,7 @@ def test_zero_jobs_does_nothing(run_jobs):
 def test_one_ok_job(run_jobs):
     todo = [TJob('foo')]
     done = run_jobs(todo)
-    assert verify_all_jobs_succeeded(done, todo)
+    assert verify_tasks(done, {'foo': 'foo done'})
 
 
 def test_one_failed_job(run_jobs):
@@ -371,7 +367,7 @@ def test_job_with_nonexisting_dependency_raises_KeyError(run_jobs):
 def test_two_independent_ok_jobs(run_jobs):
     todo = [TJob('foo'), TJob('bar')]
     done = run_jobs(todo)
-    assert verify_all_jobs_succeeded(done, todo)
+    assert verify_tasks(done, {'foo': 'foo done', 'bar': 'bar done'})
 
 
 def test_one_ok_before_another_ok_job(run_jobs):
@@ -380,7 +376,7 @@ def test_one_ok_before_another_ok_job(run_jobs):
         TJob('bar', {'foo'}),
     ]
     done = run_jobs(todo)
-    assert verify_all_jobs_succeeded(done, todo)
+    assert verify_tasks(done, {'foo': 'foo done', 'bar': 'bar done'})
 
 
 def test_one_ok_before_one_failed_job(run_jobs):
