@@ -44,6 +44,8 @@ class TJob(Job):
         subproc_sleep=0,
         thread=None,
         subproc=None,
+        spawn=None,
+        await_spawn=False,
     ):
         super().__init__(name=name, deps=deps)
         self.result = '{} done'.format(name) if result is None else result
@@ -53,6 +55,8 @@ class TJob(Job):
         self.subproc_sleep = subproc_sleep
         self.thread = thread
         self.subproc = subproc
+        self.spawn = [] if spawn is None else spawn
+        self.await_spawn = await_spawn
 
         self._expect_events = []
         self._add_event('add'),
@@ -155,6 +159,15 @@ class TJob(Job):
                     self._add_event('awaited worker proc', exit=e.returncode)
             self.logger.debug(f'Finished subprocess run: {subproc_result}')
 
+        for job in self.spawn:
+            scheduler.add(job)
+
+        if self.await_spawn and self.spawn:
+            spawn = [job.name for job in self.spawn]
+            self._add_event('await results', jobs=spawn, pending=spawn)
+            await scheduler.results(*[job.name for job in self.spawn])
+            self._add_event('awaited results')
+
         for b in self.before:
             assert b in scheduler.tasks  # The other job has been started
             assert not scheduler.tasks[b].done()  # but is not yet finished
@@ -213,7 +226,7 @@ def verify_events(scheduler):
         assert timestamps[0] >= before
         assert timestamps[-1] <= after
 
-        # Jobs are added before execution starts
+        # Initial jobs are added before execution starts
         expect_adds = [e.pop(0) for e in expect.values()]
         for e, a in zip(expect_adds, actual[:num_jobs]):
             assert verify_event(e, a)
@@ -262,6 +275,12 @@ def verify_events(scheduler):
             )
 
             # Remaining events belong to individual tasks
+            # This includes expected events from tasks that were spawned from
+            # other tasks (hence not part of the original 'todo').
+            for name, job in scheduler.jobs.items():
+                if name not in expect:  # job was spawned after .run()
+                    expect[name] = job.expect_events()
+            # Verify each event by pairing it w/that job's next expected event
             while actual:
                 a = actual.pop(0)
                 job_name = a['job']
@@ -451,6 +470,51 @@ def test_one_ok_and_one_failed_job_with_keep_going_runs_ok_job(run_jobs):
     assert verify_tasks(done, {'foo': ValueError('UGH'), 'bar': 'bar done'})
 
 
+# jobs that spawn child jobs
+
+
+def test_one_job_spawns_another(run_jobs):
+    todo = [TJob('foo', spawn=[TJob('bar')])]
+    done = run_jobs(todo)
+    assert verify_tasks(done, {'foo': 'foo done', 'bar': 'bar done'})
+
+
+def test_one_job_spawns_two_with_deps(run_jobs):
+    # foo start bar and baz, baz depends on bar, foo waits for both to finish
+    todo = [
+        TJob(
+            'foo',
+            spawn=[
+                TJob('bar', before={'foo', 'baz'}),
+                TJob('baz', {'bar'}, before={'foo'}),
+            ],
+            await_spawn=True,
+        )
+    ]
+    done = run_jobs(todo)
+    assert verify_tasks(
+        done, {'foo': 'foo done', 'bar': 'bar done', 'baz': 'baz done'}
+    )
+
+
+def test_one_job_spawns_failing_job(run_jobs):
+    todo = [TJob('foo', spawn=[TJob('bar', result=ValueError('UGH'))])]
+    done = run_jobs(todo)
+    assert verify_tasks(done, {'foo': 'foo done', 'bar': ValueError('UGH')})
+
+
+def test_job_is_cancelled_when_waiting_for_failing_spawn(run_jobs):
+    todo = [
+        TJob(
+            'foo',
+            spawn=[TJob('bar', result=ValueError('UGH'))],
+            await_spawn=True,
+        )
+    ]
+    done = run_jobs(todo)
+    assert verify_tasks(done, {'foo': Cancelled, 'bar': ValueError('UGH')})
+
+
 # jobs with work performed in threads and/or subprocesses
 
 
@@ -524,6 +588,15 @@ def test_abort_one_job_in_subproc_returns_immediately(run_jobs):
     assert verify_tasks(done, {'foo': Cancelled})
 
 
+def test_abort_one_spawned_job_returns_immediately(run_jobs):
+    todo = [
+        TJob('foo', spawn=[TJob('bar', async_sleep=0.3)], await_spawn=True)
+    ]
+    with assert_elapsed_time_within(0.2):
+        done = run_jobs(todo, abort_after=0.1)
+    assert verify_tasks(done, {'foo': Cancelled, 'bar': Cancelled})
+
+
 def test_abort_hundred_jobs_returns_immediately(run_jobs):
     todo = [TJob(f'foo #{i}', async_sleep=0.3) for i in range(100)]
     with assert_elapsed_time_within(0.5):
@@ -543,3 +616,18 @@ def test_abort_hundred_jobs_in_subprocs_returns_immediately(run_jobs):
     with assert_elapsed_time_within(2.0):
         done = run_jobs(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
+
+
+def test_abort_hundred_spawned_jobs_returns_immediately(run_jobs):
+    todo = [
+        TJob(
+            'foo',
+            spawn=[TJob(f'bar #{i}', async_sleep=0.3) for i in range(100)],
+            await_spawn=True,
+        )
+    ]
+    with assert_elapsed_time_within(0.5):
+        done = run_jobs(todo, abort_after=0.1)
+    expect = {f'bar #{i}': Cancelled for i in range(100)}
+    expect['foo'] = Cancelled
+    assert verify_tasks(done, expect)
