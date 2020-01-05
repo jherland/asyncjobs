@@ -202,7 +202,7 @@ class Scheduler:
             await asyncio.wait(self.tasks.values(), return_when=return_when)
         finally:
             # Any tasks left running at this point should be cancelled and
-            # reaped _before_ we return from here
+            # reaped/awaited _before_ we return from here
             for job_name, task in self.tasks.items():
                 if not task.done():
                     logger.warning(f'Cancelling {job_name}...')
@@ -362,32 +362,23 @@ class SignalHandlingScheduler(Scheduler):
 
     This installs appropriate signal handler to intercept SIGHUP, SIGTERM and
     SIGINT (aka. Ctrl+C or KeyboardInterrupt) and cause them to cancel and
-    clean up the Scheduler and its jobs in an orderly manner.
+    clean up the Scheduler (and its jobs) in an orderly manner.
     """
 
     handle_signals = {signal.SIGHUP, signal.SIGTERM, signal.SIGINT}
 
-    def _caught_signal(self, signum, cancel_task, cancel_jobs=False):
+    def _caught_signal(self, signum, this_task):
         logger.warning(f'Caught signal {signum}!')
-        assert self.running
-        if cancel_jobs:  # TODO: REMOVE?
-            cancelled, total = 0, 0
-            for job_name, task in self.tasks.items():
-                total += 1
-                if not task.done():
-                    logger.warning(f'Cancelling job {job_name}…')
-                    task.cancel()
-                    cancelled += 1
-            logger.warning(f'Cancelled {cancelled}/{total} jobs')
-        if cancel_task is not None and not cancel_task.done():
-            logger.warning(f'Cancelling task {cancel_task}…')
-            cancel_task.cancel()
+        assert self.running and not this_task.done()
+        logger.warning(f'Cancelling task {this_task}…')
+        this_task.cancel()
 
     @contextmanager
     def _handle_signals(self):
         loop = asyncio.get_running_loop()
+        sched_task = current_task()
         for signum in self.handle_signals:
-            handler = partial(self._caught_signal, signum, current_task())
+            handler = partial(self._caught_signal, signum, sched_task)
             loop.add_signal_handler(
                 signum, partial(loop.call_soon_threadsafe, handler)
             )
