@@ -20,7 +20,7 @@ Whatever = object()
 
 
 def verify_event(expect, actual):
-    expect_keys = set(expect.keys()) - {'ALLOW_CANCEL'}
+    expect_keys = set(expect.keys()) - {'MAY_CANCEL'}
     assert expect_keys == set(actual.keys())
     keys = sorted(expect_keys)
     for e, a in zip((expect[k] for k in keys), (actual[k] for k in keys)):
@@ -41,8 +41,8 @@ class TJob(Job):
         before=None,
         async_sleep=0,
         thread_sleep=0,
-        subproc_sleep=0,
         thread=None,
+        subproc_sleep=0,
         subproc=None,
         spawn=None,
         await_spawn=False,
@@ -51,151 +51,125 @@ class TJob(Job):
         self.result = '{} done'.format(name) if result is None else result
         self.before = set() if before is None else set(before)
         self.async_sleep = async_sleep
-        self.thread_sleep = thread_sleep
-        self.subproc_sleep = subproc_sleep
-        self.thread = thread
-        self.subproc = subproc
+        if thread_sleep:
+            if thread is not None:
+                raise ValueError('Cannot both sleep and work in thread')
+            self.thread = partial(time.sleep, thread_sleep)
+        else:
+            self.thread = thread
+        if subproc_sleep:
+            if subproc is not None:
+                raise ValueError('Cannot both sleep and work in subprocess')
+            self.subproc = ['sleep', str(subproc_sleep)]
+        else:
+            self.subproc = subproc
         self.spawn = [] if spawn is None else spawn
         self.await_spawn = await_spawn
 
-        self._expect_events = []
-        self._add_event('add'),
-        self._add_event('start'),
+        self._expected_events = []
+        self._expect_event('add'),
+        self._expect_event('start'),
 
-    def _add_event(self, event, *, allow_cancel=False, **kwargs):
+    def _expect_event(self, event, *, may_cancel=False, **kwargs):
         d = {'event': event, 'job': self.name, 'timestamp': Whatever}
         d.update(kwargs)
-        if allow_cancel:
-            d['ALLOW_CANCEL'] = True
-        self._expect_events.append(d)
+        if may_cancel:
+            d['MAY_CANCEL'] = True
+        self._expected_events.append(d)
 
-    def expect_events(self):
-        if self._expect_events[-1]['event'] != 'finish':  # we were cancelled
-            self._add_event('finish', fate='cancelled')
-        return self._expect_events
+    def expected_events(self):
+        if self._expected_events[-1]['event'] != 'finish':  # we were cancelled
+            self._expect_event('finish', fate='cancelled')
+        return self._expected_events
+
+    async def _do_thread_stuff(self, scheduler):
+        self.logger.debug(f'Await call {self.thread} in thread…')
+        self._expect_event('await worker slot')
+        self._expect_event('awaited worker slot', may_cancel=True)
+        self._expect_event(
+            'await worker thread', may_cancel=True, func=Whatever
+        )
+        try:
+            ret = await scheduler.call_in_thread(self.thread)
+            self._expect_event('awaited worker thread', fate='success')
+        except asyncio.CancelledError:
+            self._expect_event(
+                'awaited worker thread', may_cancel=True, fate='cancelled',
+            )
+            raise
+        except Exception as e:
+            ret = e
+            self._expect_event('awaited worker thread', fate='failed')
+        self.logger.debug(f'Finished thread call: {ret}')
+        return ret
+
+    async def _do_subproc_stuff(self, scheduler):
+        self.logger.debug(f'Await run {self.subproc} in subprocess…')
+        self._expect_event('await worker slot')
+        self._expect_event('awaited worker slot', may_cancel=True)
+        self._expect_event(
+            'await worker proc', may_cancel=True, argv=self.subproc
+        )
+        try:
+            ret = await scheduler.run_in_subprocess(self.subproc)
+            self._expect_event('awaited worker proc', exit=0)
+        except asyncio.CancelledError:
+            self._expect_event(
+                'awaited worker proc', may_cancel=True, exit=-15
+            )
+            raise
+        except Exception as e:
+            ret = e
+            if isinstance(e, CalledProcessError):
+                self._expect_event('awaited worker proc', exit=e.returncode)
+        self.logger.debug(f'Finished subprocess run: {ret}')
+        return ret
 
     async def __call__(self, scheduler):
         if self.deps:
             if self.deps == {'MISSING'}:
-                self._add_event('finish', fate='failed')  # expect KeyError
+                self._expect_event('finish', fate='failed')  # expect KeyError
             else:
-                self._add_event(
+                self._expect_event(
                     'await results', jobs=list(self.deps), pending=Whatever
                 )
         dep_results = await super().__call__(scheduler)
         if self.deps:
-            self._add_event('awaited results')
+            self._expect_event('awaited results')
         self.logger.debug(f'Results from deps: {dep_results}')
 
-        thread_result, subproc_result = None, None
         if self.async_sleep:
             self.logger.info(f'Async sleep for {self.async_sleep} seconds…')
             await asyncio.sleep(self.async_sleep)
             self.logger.info(f'Finished async sleep')
-        if self.thread_sleep:
-            self.logger.debug(f'time.sleep({self.thread_sleep}) in thread…')
-            self._add_event('await worker slot')
-            self._add_event('awaited worker slot', allow_cancel=True)
-            self._add_event(
-                'await worker thread', allow_cancel=True, func=Whatever
-            )
-            try:
-                thread_result = await scheduler.call_in_thread(
-                    partial(time.sleep, self.thread_sleep)
-                )
-                self._add_event('awaited worker thread', fate='success')
-            except asyncio.CancelledError:
-                self._add_event(
-                    'awaited worker thread',
-                    allow_cancel=True,
-                    fate='cancelled',
-                )
-                raise
-            self.logger.debug(f'Finished thread sleep: {thread_result}')
-        if self.subproc_sleep:
-            argv = ['sleep', str(self.subproc_sleep)]
-            self.logger.debug(f'sleep {self.subproc_sleep} in subprocess…')
-            self._add_event('await worker slot')
-            self._add_event('awaited worker slot', allow_cancel=True)
-            self._add_event('await worker proc', allow_cancel=True, argv=argv)
-            try:
-                subproc_result = await scheduler.run_in_subprocess(argv)
-                self._add_event('awaited worker proc', exit=0)
-            except asyncio.CancelledError:
-                self._add_event(
-                    'awaited worker proc', allow_cancel=True, exit=-15
-                )
-                raise
-            self.logger.debug(f'Finished subproc sleep: {subproc_result}')
+
+        result = self.result
         if self.thread:
-            self.logger.debug(f'Await call {self.thread} in thread…')
-            self._add_event('await worker slot')
-            self._add_event('awaited worker slot', allow_cancel=True)
-            self._add_event(
-                'await worker thread', allow_cancel=True, func=Whatever
-            )
-            try:
-                thread_result = await scheduler.call_in_thread(self.thread)
-                self._add_event('awaited worker thread', fate='success')
-            except Exception as e:
-                thread_result = e
-                self._add_event('awaited worker thread', fate='failed')
-            self.logger.debug(f'Finished thread call: {thread_result}')
+            result = await self._do_thread_stuff(scheduler)
         if self.subproc:
-            self.logger.debug(f'Await run {self.subproc} in subprocess…')
-            self._add_event('await worker slot')
-            self._add_event('awaited worker slot', allow_cancel=True)
-            self._add_event(
-                'await worker proc', allow_cancel=True, argv=self.subproc
-            )
-            try:
-                subproc_result = await scheduler.run_in_subprocess(
-                    self.subproc
-                )
-                self._add_event('awaited worker proc', exit=0)
-            except Exception as e:
-                subproc_result = e
-                if isinstance(e, CalledProcessError):
-                    self._add_event('awaited worker proc', exit=e.returncode)
-            self.logger.debug(f'Finished subprocess run: {subproc_result}')
+            result = await self._do_subproc_stuff(scheduler)
 
         for job in self.spawn:
             scheduler.add(job)
 
         if self.await_spawn and self.spawn:
             spawn = [job.name for job in self.spawn]
-            self._add_event('await results', jobs=spawn, pending=spawn)
+            self._expect_event('await results', jobs=spawn, pending=spawn)
             await scheduler.results(*[job.name for job in self.spawn])
-            self._add_event('awaited results')
+            self._expect_event('awaited results')
 
         for b in self.before:
             assert b in scheduler.tasks  # The other job has been started
             assert not scheduler.tasks[b].done()  # but is not yet finished
 
-        if isinstance(thread_result, Exception):
-            self.logger.info(f'Raising thread exception: {thread_result}')
-            self._add_event('finish', fate='failed')
-            raise thread_result
-        elif isinstance(subproc_result, Exception):
-            self.logger.info(f'Raising subproc exception: {subproc_result}')
-            self._add_event('finish', fate='failed')
-            raise subproc_result
-        elif isinstance(self.result, Exception):
-            self.logger.info(f'Raising exception: {self.result}')
-            self._add_event('finish', fate='failed')
-            raise self.result
-        elif thread_result is not None:
-            self.logger.info(f'Returning thread result: {thread_result}')
-            self._add_event('finish', fate='success')
-            return thread_result
-        elif subproc_result is not None:
-            self.logger.info(f'Returning subproc result: {subproc_result}')
-            self._add_event('finish', fate='success')
-            return subproc_result
+        if isinstance(result, Exception):
+            self.logger.info(f'Raising exception: {result}')
+            self._expect_event('finish', fate='failed')
+            raise result
         else:
-            self.logger.info(f'Returning result: {self.result}')
-            self._add_event('finish', fate='success')
-            return self.result
+            self.logger.info(f'Returning result: {result}')
+            self._expect_event('finish', fate='success')
+            return result
 
 
 class TScheduler(SignalHandlingScheduler, ExternalWorkScheduler):
@@ -218,7 +192,7 @@ def verify_events(scheduler):
         nonlocal actual, before
         after = time.time()
         num_jobs = len(todo)
-        expect = {j.name: j.expect_events() for j in todo}
+        expect = {j.name: j.expected_events() for j in todo}
 
         # Timestamps are in sorted order and all between 'before' and 'after'
         timestamps = [e['timestamp'] for e in actual]
@@ -279,14 +253,14 @@ def verify_events(scheduler):
             # other tasks (hence not part of the original 'todo').
             for name, job in scheduler.jobs.items():
                 if name not in expect:  # job was spawned after .run()
-                    expect[name] = job.expect_events()
+                    expect[name] = job.expected_events()
             # Verify each event by pairing it w/that job's next expected event
             while actual:
                 a = actual.pop(0)
                 job_name = a['job']
                 e = expect[job_name].pop(0)
                 if a['event'] == 'finish' and a['fate'] == 'cancelled':
-                    while e.get('ALLOW_CANCEL', False):
+                    while e.get('MAY_CANCEL', False):
                         e = expect[job_name].pop(0)
                 assert verify_event(e, a)
 
