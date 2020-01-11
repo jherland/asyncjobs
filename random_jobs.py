@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
-import concurrent.futures
 import itertools
 import logging
 import random
@@ -9,18 +8,20 @@ import sys
 import time
 
 from ansicolors import AnsiColors, AnsiColorFormatter
-from scheduler import JobInWorker, JobWithDeps, Scheduler
+from jobs import Job, ExternalWorkScheduler
 
 logger = logging.getLogger('random_jobs')
 
 
-class TimeWaster(JobInWorker):
+class TimeWaster(Job):
     def __init__(self, work, **kwargs):
         self.work = work
         super().__init__(**kwargs)
+        self.logger.info(self)
 
     def __str__(self):
-        return f'{super().__str__()}/{self.work}'
+        deps = ', '.join(sorted(self.deps))
+        return f'{super().__str__()}[{deps}]/{self.work}'
 
     def do_work(self):
         self.logger.info(f'Doing own work: {self.work}')
@@ -28,8 +29,12 @@ class TimeWaster(JobInWorker):
         self.logger.info(f'Finished own work: {self.work}')
         return {self.name: self.work}
 
+    async def __call__(self, scheduler):
+        self.dep_results = await super().__call__(scheduler)
+        return await scheduler.call_in_thread(self.do_work)
 
-class ParallelTimeWaster(JobWithDeps, TimeWaster):
+
+class ParallelTimeWaster(TimeWaster):
     def __init__(self, *, work_threshold, **kwargs):
         self.work_threshold = work_threshold
         super().__init__(**kwargs)
@@ -106,7 +111,7 @@ def main():
         formatter(
             fmt=(
                 '{relativeCreated:8.0f} {process:5}/{threadName:10} '
-                '{name:>10}: {message}'
+                '{name:>16}: {message}'
             ),
             style='{',
         )
@@ -119,19 +124,7 @@ def main():
     job_generator = RandomJob.generate(args.dep_prob, args.max_work)
     jobs = list(itertools.islice(job_generator, args.num_jobs))
 
-    if args.workers == 0:
-        print('Running synchronously…')
-        workers = None
-    elif args.workers > 0:
-        print(f'Running with {args.workers} worker threads…')
-        workers = concurrent.futures.ThreadPoolExecutor(
-            args.workers, 'Builder'
-        )
-    elif args.workers < 0:
-        worker_procs = -args.workers
-        print(f'Running with {worker_procs} worker processes…')
-        workers = concurrent.futures.ProcessPoolExecutor(worker_procs)
-    builder = Scheduler(workers)
+    builder = ExternalWorkScheduler(workers=args.workers)
     for job in jobs:
         builder.add(job)
     results = asyncio.run(builder.run(), debug=False)
