@@ -7,7 +7,7 @@ import sys
 import time
 
 from conftest import abort_in, assert_elapsed_time_within
-from scheduler import (
+from jobs import (
     Job,
     ExternalWorkScheduler,
     SignalHandlingScheduler,
