@@ -3,6 +3,7 @@ from functools import partial
 import logging
 import pytest
 from subprocess import CalledProcessError
+import sys
 import time
 
 from conftest import abort_in, assert_elapsed_time_within
@@ -611,3 +612,19 @@ def test_abort_hundred_spawned_jobs_returns_immediately(run_jobs):
     expect = {f'bar #{i}': Cancelled for i in range(100)}
     expect['foo'] = Cancelled
     assert verify_tasks(done, expect)
+
+
+def test_output_from_one_job(run_jobs, capfd):
+    out = "This is foo's stdout\n"
+    err = "This is foo's stderr\n"
+
+    def print_something():
+        print(out, end='')
+        print(err, end='', file=sys.stderr)
+
+    todo = [TJob('foo', call=print_something)]
+    done = run_jobs(todo)
+    assert verify_tasks(done, {'foo': 'foo done'})
+    actual = capfd.readouterr()
+    assert out == actual.out
+    assert err == actual.err
