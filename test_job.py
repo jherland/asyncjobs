@@ -39,6 +39,7 @@ class TJob(Job):
         *,
         result=None,
         before=None,
+        call=None,
         async_sleep=0,
         thread_sleep=0,
         thread=None,
@@ -50,6 +51,7 @@ class TJob(Job):
         super().__init__(name=name, deps=deps)
         self.result = '{} done'.format(name) if result is None else result
         self.before = set() if before is None else set(before)
+        self.call = call
         self.async_sleep = async_sleep
         if thread_sleep:
             if thread is not None:
@@ -138,12 +140,16 @@ class TJob(Job):
             self._expect_event('awaited results')
         self.logger.debug(f'Results from deps: {dep_results}')
 
+        result = None
+        if self.call:
+            result = self.call()
         if self.async_sleep:
             self.logger.info(f'Async sleep for {self.async_sleep} seconds…')
             await asyncio.sleep(self.async_sleep)
             self.logger.info(f'Finished async sleep')
 
-        result = self.result
+        if self.result is not None:
+            result = self.result
         if self.thread:
             result = await self._do_thread_stuff(scheduler)
         if self.subproc:
