@@ -248,105 +248,94 @@ def scheduler(request):
     yield TScheduler(workers=request.param)
 
 
-@pytest.fixture
-def verify_events(scheduler):
-    actual = []
-    scheduler.event_handler = actual.append
-    before = time.time()
+def verify_events(scheduler, start_time, actual, todo, done):
+    after = time.time()
+    num_jobs = len(todo)
+    expect = {j.name: j.expected_events() for j in todo}
 
-    def _verify_events(todo, done):
-        nonlocal actual, before
-        after = time.time()
-        num_jobs = len(todo)
-        expect = {j.name: j.expected_events() for j in todo}
+    # Timestamps are in sorted order and all between 'start_time' and 'after'
+    timestamps = [e['timestamp'] for e in actual]
+    assert timestamps == sorted(timestamps)
+    assert timestamps[0] >= start_time
+    assert timestamps[-1] <= after
 
-        # Timestamps are in sorted order and all between 'before' and 'after'
-        timestamps = [e['timestamp'] for e in actual]
-        assert timestamps == sorted(timestamps)
-        assert timestamps[0] >= before
-        assert timestamps[-1] <= after
+    # Initial jobs are added before execution starts
+    expect_adds = [e.pop(0) for e in expect.values()]
+    for e, a in zip(expect_adds, actual[:num_jobs]):
+        assert verify_event(e, a)
+    actual = actual[num_jobs:]
 
-        # Initial jobs are added before execution starts
-        expect_adds = [e.pop(0) for e in expect.values()]
-        for e, a in zip(expect_adds, actual[:num_jobs]):
+    # Overall execution start and finish
+    overall_start, overall_finish = actual.pop(0), actual.pop()
+    assert verify_event(
+        {
+            'event': 'start',
+            'num_jobs': num_jobs,
+            'keep_going': Whatever,
+            'timestamp': Whatever,
+        },
+        overall_start,
+    )
+    assert verify_event(
+        {'event': 'finish', 'num_tasks': len(done), 'timestamp': Whatever},
+        overall_finish,
+    )
+
+    if expect:
+        # Jobs are started
+        expect_starts = [e.pop(0) for e in expect.values()]
+        for e, a in zip(expect_starts, actual[:num_jobs]):
             assert verify_event(e, a)
         actual = actual[num_jobs:]
 
-        # Overall execution start and finish
-        overall_start, overall_finish = actual.pop(0), actual.pop()
+        # Await task execution
+        await_tasks, awaited_tasks = actual.pop(0), actual.pop()
         assert verify_event(
             {
-                'event': 'start',
-                'num_jobs': num_jobs,
-                'keep_going': Whatever,
+                'event': 'await tasks',
+                'jobs': [j.name for j in todo],
                 'timestamp': Whatever,
             },
-            overall_start,
+            await_tasks,
         )
         assert verify_event(
-            {
-                'event': 'finish',
-                'num_tasks': len(done),
-                'timestamp': Whatever,
-            },
-            overall_finish,
+            {'event': 'awaited tasks', 'timestamp': Whatever}, awaited_tasks,
         )
 
-        if expect:
-            # Jobs are started
-            expect_starts = [e.pop(0) for e in expect.values()]
-            for e, a in zip(expect_starts, actual[:num_jobs]):
-                assert verify_event(e, a)
-            actual = actual[num_jobs:]
+        # Remaining events belong to individual tasks
+        # This includes expected events from tasks that were spawned from
+        # other tasks (hence not part of the original 'todo').
+        for name, job in scheduler.jobs.items():
+            if name not in expect:  # job was spawned after .run()
+                expect[name] = job.expected_events()
+        # Verify each event by pairing it w/that job's next expected event
+        while actual:
+            a = actual.pop(0)
+            job_name = a['job']
+            e = expect[job_name].pop(0)
+            if a['event'] == 'finish' and a['fate'] == 'cancelled':
+                while e.get('MAY_CANCEL', False):
+                    e = expect[job_name].pop(0)
+            assert verify_event(e, a)
 
-            # Await task execution
-            await_tasks, awaited_tasks = actual.pop(0), actual.pop()
-            assert verify_event(
-                {
-                    'event': 'await tasks',
-                    'jobs': [j.name for j in todo],
-                    'timestamp': Whatever,
-                },
-                await_tasks,
-            )
-            assert verify_event(
-                {'event': 'awaited tasks', 'timestamp': Whatever},
-                awaited_tasks,
-            )
+        # No more expected events
+        assert all(len(e) == 0 for e in expect.values())
 
-            # Remaining events belong to individual tasks
-            # This includes expected events from tasks that were spawned from
-            # other tasks (hence not part of the original 'todo').
-            for name, job in scheduler.jobs.items():
-                if name not in expect:  # job was spawned after .run()
-                    expect[name] = job.expected_events()
-            # Verify each event by pairing it w/that job's next expected event
-            while actual:
-                a = actual.pop(0)
-                job_name = a['job']
-                e = expect[job_name].pop(0)
-                if a['event'] == 'finish' and a['fate'] == 'cancelled':
-                    while e.get('MAY_CANCEL', False):
-                        e = expect[job_name].pop(0)
-                assert verify_event(e, a)
-
-            # No more expected events
-            assert all(len(e) == 0 for e in expect.values())
-
-        assert not actual  # no more actual events
-        return True
-
-    return _verify_events
+    assert not actual  # no more actual events
+    return True
 
 
 @pytest.fixture
-def run_jobs(scheduler, verify_events):
+def run_jobs(scheduler):
     def _run_jobs(todo, abort_after=0, **kwargs):
+        events = []
+        scheduler.event_handler = events.append
+        before = time.time()
         for job in todo:
             scheduler.add(job)
         with abort_in(abort_after):
             done = asyncio.run(scheduler.run(**kwargs), debug=True)
-        verify_events(todo, done)
+        verify_events(scheduler, before, events, todo, done)
         return done
 
     return _run_jobs
