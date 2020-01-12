@@ -1,6 +1,21 @@
 import pytest
 
-from conftest import Cancelled, TSimpleJob, verify_tasks
+from jobs import Scheduler
+
+from conftest import (
+    Cancelled,
+    setup_and_run_scheduler,
+    TSimpleJob,
+    verify_tasks,
+)
+
+
+@pytest.fixture
+def run_jobs():
+    def _run_jobs(todo, **run_args):
+        return setup_and_run_scheduler(Scheduler, todo, **run_args)
+
+    return _run_jobs
 
 
 TJob = TSimpleJob

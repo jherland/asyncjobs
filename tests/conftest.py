@@ -3,12 +3,11 @@ from contextlib import contextmanager
 from functools import partial
 import logging
 import os
-import pytest
 import signal
 from subprocess import CalledProcessError
 import time
 
-from jobs import Job, ExternalWorkScheduler, SignalHandlingScheduler
+from jobs import Job
 
 logger = logging.getLogger(__name__)
 
@@ -238,19 +237,10 @@ class TExternalWorkJob(TSimpleJob):
         return result
 
 
-class TScheduler(SignalHandlingScheduler, ExternalWorkScheduler):
-    pass
-
-
-@pytest.fixture(params=[1, 2, 4, 100])
-def scheduler(request):
-    logger.info(f'Creating scheduler with {request.param} worker threads')
-    yield TScheduler(workers=request.param)
-
-
-def verify_events(scheduler, start_time, actual, todo, done):
+def verify_events(scheduler, start_time, actual, todo):
     after = time.time()
     num_jobs = len(todo)
+    num_tasks = len(scheduler.tasks)
     expect = {j.name: j.expected_events() for j in todo}
 
     # Timestamps are in sorted order and all between 'start_time' and 'after'
@@ -277,7 +267,7 @@ def verify_events(scheduler, start_time, actual, todo, done):
         overall_start,
     )
     assert verify_event(
-        {'event': 'finish', 'num_tasks': len(done), 'timestamp': Whatever},
+        {'event': 'finish', 'num_tasks': num_tasks, 'timestamp': Whatever},
         overall_finish,
     )
 
@@ -325,20 +315,21 @@ def verify_events(scheduler, start_time, actual, todo, done):
     return True
 
 
-@pytest.fixture
-def run_jobs(scheduler):
-    def _run_jobs(todo, abort_after=0, **kwargs):
-        events = []
-        scheduler.event_handler = events.append
-        before = time.time()
-        for job in todo:
-            scheduler.add(job)
-        with abort_in(abort_after):
-            done = asyncio.run(scheduler.run(**kwargs), debug=True)
-        verify_events(scheduler, before, events, todo, done)
-        return done
+@contextmanager
+def setup_scheduler(scheduler_cls, todo):
+    events = []
+    scheduler = scheduler_cls(event_handler=events.append)
+    before = time.time()
+    for job in todo:
+        scheduler.add(job)
+    yield scheduler
+    verify_events(scheduler, before, events, todo)
 
-    return _run_jobs
+
+def setup_and_run_scheduler(scheduler_cls, todo, abort_after=0, **run_args):
+    with setup_scheduler(scheduler_cls, todo) as scheduler:
+        with abort_in(abort_after):
+            return asyncio.run(scheduler.run(**run_args), debug=True)
 
 
 Cancelled = object()

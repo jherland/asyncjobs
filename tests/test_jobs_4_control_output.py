@@ -1,8 +1,23 @@
+import pytest
 import sys
 
-from conftest import TSimpleJob, verify_tasks
+from jobs import Scheduler
 
-TJob = TSimpleJob
+from conftest import setup_and_run_scheduler, TSimpleJob, verify_tasks
+
+
+@pytest.fixture
+def run_jobs():
+    def _run_jobs(todo, **kwargs):
+        return setup_and_run_scheduler(Scheduler, todo, **kwargs)
+
+    return _run_jobs
+
+
+class TJob(TSimpleJob):
+    def __init__(self, *args, prefix='', **kwargs):
+        super().__init__(*args, **kwargs)
+        self.prefix = prefix
 
 
 def test_output_from_one_job(run_jobs, capfd):
