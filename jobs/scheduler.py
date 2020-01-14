@@ -44,7 +44,7 @@ class Scheduler:
                 job(self), name=job.name
             )
         else:
-            task = asyncio.ensure_future(job(self))
+            task = asyncio.ensure_future(job(self))  # .create_task() in >=v3.7
             task.job_name = job.name
             self.tasks[job.name] = task
         self.event('start', job.name)
