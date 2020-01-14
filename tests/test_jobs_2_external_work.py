@@ -7,10 +7,12 @@ from jobs import ExternalWorkScheduler
 
 from conftest import (
     Cancelled,
-    setup_and_run_scheduler,
+    setup_scheduler,
     TExternalWorkJob,
     verify_tasks,
 )
+
+pytestmark = pytest.mark.asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -22,31 +24,32 @@ def scheduler_cls(request):
 
 
 @pytest.fixture
-def run_jobs(scheduler_cls):
-    def _run_jobs(todo, **run_args):
-        return setup_and_run_scheduler(scheduler_cls, todo, **run_args)
+def run(scheduler_cls):
+    async def _run(todo, **run_args):
+        with setup_scheduler(scheduler_cls, todo) as scheduler:
+            return await scheduler.run(**run_args)
 
-    return _run_jobs
+    return _run
 
 
 TJob = TExternalWorkJob
 
 
-def test_one_ok_job_in_thread(run_jobs):
+async def test_one_ok_job_in_thread(run):
     todo = [TJob('foo', thread=lambda: 'foo worked')]
-    done = run_jobs(todo)
+    done = await run(todo)
     assert verify_tasks(done, {'foo': 'foo worked'})
 
 
-def test_one_ok_job_in_subproc(run_jobs, tmp_path):
+async def test_one_ok_job_in_subproc(run, tmp_path):
     path = tmp_path / 'foo'
     todo = [TJob('foo', subproc=['touch', str(path)])]
-    done = run_jobs(todo)
+    done = await run(todo)
     assert verify_tasks(done, {'foo': 0})
     assert path.is_file()
 
 
-def test_one_failed_between_two_ok_jobs_in_threads_cancels_last(run_jobs):
+async def test_one_failed_between_two_ok_jobs_in_threads_cancels_last(run):
     def raiseUGH():
         raise ValueError('UGH')
 
@@ -55,13 +58,13 @@ def test_one_failed_between_two_ok_jobs_in_threads_cancels_last(run_jobs):
         TJob('bar', {'foo'}, before={'baz'}, thread=raiseUGH),
         TJob('baz', {'bar'}, thread=lambda: 'baz worked'),
     ]
-    done = run_jobs(todo)
+    done = await run(todo)
     assert verify_tasks(
         done, {'foo': 'foo worked', 'bar': ValueError('UGH'), 'baz': Cancelled}
     )
 
 
-def test_one_failed_between_two_in_subprocs_cancels_last(run_jobs, tmp_path):
+async def test_one_failed_between_two_in_subprocs_cancels_last(run, tmp_path):
     foo_path = tmp_path / 'foo'
     baz_path = tmp_path / 'baz'
     todo = [
@@ -69,7 +72,7 @@ def test_one_failed_between_two_in_subprocs_cancels_last(run_jobs, tmp_path):
         TJob('bar', {'foo'}, before={'baz'}, subproc=['false']),
         TJob('baz', {'bar'}, subproc=['touch', str(baz_path)]),
     ]
-    done = run_jobs(todo)
+    done = await run(todo)
     assert verify_tasks(
         done,
         {'foo': 0, 'bar': CalledProcessError(1, ['false']), 'baz': Cancelled},

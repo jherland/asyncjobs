@@ -16,24 +16,22 @@ logger = logging.getLogger(__name__)
 def abort_in(when=0, assert_on_escape=True):
     """Simulate Ctrl+C (aka. KeyboardInterrupt/SIGINT) after the given delay.
 
-    This will schedule (via SIGALRM) a SIGINT signal in the current process
-    after the given number of seconds if we're still within the context.
-    Upon context exit, the signal is cancelled and the signal handler
-    deregistered.
+    This will schedule a SIGINT signal in the current process after the given
+    number of seconds if we're still within the context. Upon context exit,
+    the signal is cancelled.
 
-    If the signal is handled within the context, no further action is taken
-    (except deregistering the signal handler on context exit). Otherwise, if
-    the signal/KeyboardInterrupt escapes the context, an error is logged and
-    (unless assert_on_escape is explicitly disabled) an assertion is raised
-    (to fail the current test).
+    If the signal is handled within the context, no further action is taken.
+    Otherwise, if the signal/KeyboardInterrupt escapes the context, an error
+    is logged and (unless assert_on_escape is explicitly disabled) an
+    assertion is raised (to fail the current test).
     """
 
-    def handle_SIGALRM(signal_number, stack_frame):
+    async def wait_and_kill():
+        await asyncio.sleep(when)
         logger.warning('Raising SIGINT to simulate Ctrl+C…')
         os.kill(os.getpid(), signal.SIGINT)
 
-    prev_handler = signal.signal(signal.SIGALRM, handle_SIGALRM)
-    signal.setitimer(signal.ITIMER_REAL, when)
+    task = asyncio.ensure_future(wait_and_kill())  # .create_task() in >=v3.7
     try:
         yield
     except KeyboardInterrupt:
@@ -41,8 +39,9 @@ def abort_in(when=0, assert_on_escape=True):
         if assert_on_escape:
             assert False, 'SIGINT/KeyboardInterrupt escaped the context!'
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, prev_handler)
+        if not task.done():
+            logger.debug(f'context complete before {when}')
+            task.cancel()
 
 
 @contextmanager
@@ -324,12 +323,6 @@ def setup_scheduler(scheduler_cls, todo):
         scheduler.add(job)
     yield scheduler
     verify_events(scheduler, before, events, todo)
-
-
-def setup_and_run_scheduler(scheduler_cls, todo, abort_after=0, **run_args):
-    with setup_scheduler(scheduler_cls, todo) as scheduler:
-        with abort_in(abort_after):
-            return asyncio.run(scheduler.run(**run_args), debug=True)
 
 
 Cancelled = object()
