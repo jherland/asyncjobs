@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from functools import partial
 import logging
 import os
+import pytest
 import signal
 from subprocess import CalledProcessError
 import time
@@ -361,3 +362,35 @@ def verify_tasks(tasks, expects):
             if task.result() != expect:
                 fail(name, expect, task.result())
     return errors == 0
+
+
+@pytest.fixture
+def verify_output(capfd):
+    def _verify_one_output(expect_lines_from_streams, actual_text):
+        logger.debug(
+            f'Verifying {actual_text!r} against {expect_lines_from_streams}'
+        )
+        actual_lines = actual_text.split('\n')
+        assert actual_lines.pop() == ''
+        for actual_line in actual_lines:
+            # Expect this line is the next line from one of our streams
+            expected = set()
+            for expect_lines in expect_lines_from_streams:
+                if expect_lines and actual_line == expect_lines[0]:  # found it
+                    expect_lines.pop(0)
+                    break
+                elif expect_lines:
+                    expected.add(expect_lines[0])
+            else:  # no match for any stream
+                assert False, f'actual: {actual_line!r}, expect: {expected!r}'
+        # no more lines expected
+        assert all(e == [] for e in expect_lines_from_streams)
+
+    def _verify_output(expect_stdout_streams, expect_stderr_streams=None):
+        actual = capfd.readouterr()
+        _verify_one_output(expect_stdout_streams, actual.out)
+        if expect_stderr_streams is not None:
+            _verify_one_output(expect_stderr_streams, actual.err)
+        return True
+
+    return _verify_output
