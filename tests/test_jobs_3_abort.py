@@ -81,20 +81,20 @@ async def test_abort_one_spawned_job_returns_immediately(run):
 
 async def test_abort_hundred_jobs_returns_immediately(run):
     todo = [TJob(f'foo #{i}', async_sleep=0.3) for i in range(100)]
-    with assert_elapsed_time_within(0.5):
+    with assert_elapsed_time_within(0.2):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
 
 
 async def test_abort_hundred_jobs_in_threads_returns_immediately(run):
-    todo = [TJob(f'foo #{i}', thread_sleep=0.3) for i in range(100)]
+    todo = [TJob(f'foo #{i}', thread_sleep=1.0) for i in range(100)]
     with assert_elapsed_time_within(0.5):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
 
 
 async def test_abort_hundred_jobs_in_subprocs_returns_immediately(run):
-    todo = [TJob(f'foo #{i}', subproc_sleep=30) for i in range(100)]
+    todo = [TJob(f'foo #{i}', subproc_sleep=5.0) for i in range(100)]
     with assert_elapsed_time_within(2.0):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
@@ -108,7 +108,7 @@ async def test_abort_hundred_spawned_jobs_returns_immediately(run):
             await_spawn=True,
         )
     ]
-    with assert_elapsed_time_within(0.5):
+    with assert_elapsed_time_within(0.2):
         done = await run(todo, abort_after=0.1)
     expect = {f'bar #{i}': Cancelled for i in range(100)}
     expect['foo'] = Cancelled

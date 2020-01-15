@@ -228,7 +228,6 @@ class TExternalWorkJob(TSimpleJob):
         return ret
 
     async def do_work(self, scheduler):
-        self.logger.error('DOING WORK!')
         result = await super().do_work(scheduler)
         if self.thread:
             result = await self._do_thread_stuff(scheduler)
