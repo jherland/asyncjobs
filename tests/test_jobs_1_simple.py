@@ -180,3 +180,9 @@ async def test_job_is_cancelled_when_waiting_for_failing_spawn():
     ]
     done = await run(todo)
     assert verify_tasks(done, {'foo': Cancelled, 'bar': ValueError('UGH')})
+
+
+async def test_spawn_outliving_parent_is_not_cancelled_by_scheduler():
+    todo = [TJob('foo', spawn=[TJob('bar', async_sleep=0.01)])]
+    done = await run(todo)
+    assert verify_tasks(done, {'foo': 'foo done', 'bar': 'bar done'})

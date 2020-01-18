@@ -101,7 +101,25 @@ class Scheduler:
         logger.info(f'Waiting for all jobs to complete…')
         self.event('await tasks', info={'jobs': list(self.tasks.keys())})
         try:
-            await asyncio.wait(self.tasks.values(), return_when=return_when)
+            while True:
+                # Await the tasks that are currently running. More tasks may be
+                # spawned while we're waiting, and those are not awaited here.
+                await asyncio.wait(
+                    self.tasks.values(), return_when=return_when
+                )
+                # We know _some_ task completed, successfully or not
+                if return_when == concurrent.futures.FIRST_COMPLETED:
+                    break
+                elif return_when == concurrent.futures.FIRST_EXCEPTION:
+                    # Figure out if there are failed tasks and we should return
+                    if any(
+                        t.done() and (t.cancelled() or t.exception())
+                        for t in self.tasks.values()
+                    ):
+                        break
+                # Otherwise return when all tasks are done
+                if all(t.done() for t in self.tasks.values()):
+                    break
         finally:
             # Any tasks left running at this point should be cancelled and
             # reaped/awaited _before_ we return from here
