@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from functools import partial
 import logging
+from pathlib import Path
 import pytest
 import random
 import sys
@@ -15,6 +16,8 @@ from conftest import setup_scheduler, TExternalWorkJob
 pytestmark = pytest.mark.asyncio
 
 logger = logging.getLogger(__name__)
+
+sh_helper = Path(__file__).parent / 'test_jobs_5_logmuxed_jobs_helper.sh'
 
 
 @pytest.fixture(params=[1, 2, 4, 100])
@@ -47,7 +50,7 @@ class TJob(TExternalWorkJob):
         self.stderr = None
         if in_thread:
             self.thread = self.print_out_and_err(True)
-        else:
+        elif 'subproc' not in kwargs:
             self.do_work = self.print_out_and_err(False)
 
     def print_out_and_err(self, sync):
@@ -261,6 +264,34 @@ async def test_decorated_output_from_thread_worker(run, verify_output):
             err=err.format(name=name),
             redirect=True,
             in_thread=True,
+        )
+        for name in jobs
+    ]
+    await run(todo)
+
+    outprefix = '{name}/out: '
+    errprefix = '{name}/ERR: '
+    assert verify_output(
+        [[(outprefix + out).format(name=name)] for name in jobs],
+        [[(errprefix + err).format(name=name)] for name in jobs],
+    )
+
+
+async def test_decorated_output_from_subprocess_worker(run, verify_output):
+    assert sh_helper.is_file()
+    jobs = ['foo', 'bar']
+    out = "This is {name}'s stdout"
+    err = "This is {name}'s stderr"
+
+    todo = [
+        TJob(
+            name,
+            redirect=True,
+            subproc=[
+                str(sh_helper),
+                out.format(name=name),
+                err.format(name=name),
+            ],
         )
         for name in jobs
     ]
