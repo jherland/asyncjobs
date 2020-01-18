@@ -8,7 +8,7 @@ import signal
 from subprocess import CalledProcessError
 import time
 
-from jobs import Job
+from jobs import basic
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def verify_event(expect, actual):
     return True
 
 
-class TSimpleJob(Job):
+class TSimpleJob(basic.Job):
     """Async jobs with test instrumentation."""
 
     def __init__(

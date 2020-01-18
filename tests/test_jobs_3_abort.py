@@ -2,7 +2,7 @@ from functools import partial
 import logging
 import pytest
 
-from jobs import ExternalWorkScheduler, SignalHandlingScheduler
+from jobs import external_work, signal_handling
 
 from conftest import (
     abort_in,
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture(params=[1, 2, 4, 100])
 def scheduler_cls(request):
-    class MyScheduler(SignalHandlingScheduler, ExternalWorkScheduler):
+    class MyScheduler(signal_handling.Scheduler, external_work.Scheduler):
         pass
 
     logger.info(f'creating scheduler with {request.param} worker threads')

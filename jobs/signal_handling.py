@@ -4,13 +4,16 @@ from functools import partial
 import logging
 import signal
 
-from .scheduler import Scheduler
+from . import basic
 from .util import current_task
 
 logger = logging.getLogger(__name__)
 
 
-class SignalHandlingScheduler(Scheduler):
+Job = basic.Job
+
+
+class Scheduler(basic.Scheduler):
     """Teach Scheduler to cancel/abort properly on incoming signals.
 
     This installs appropriate signal handler to intercept SIGHUP, SIGTERM and

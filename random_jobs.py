@@ -8,7 +8,7 @@ import sys
 import time
 
 from ansicolors import AnsiColors, AnsiColorFormatter
-from jobs import Job, ExternalWorkScheduler
+from jobs.external_work import Job, Scheduler
 
 logger = logging.getLogger('random_jobs')
 
@@ -124,7 +124,7 @@ def main():
     job_generator = RandomJob.generate(args.dep_prob, args.max_work)
     jobs = list(itertools.islice(job_generator, args.num_jobs))
 
-    builder = ExternalWorkScheduler(workers=args.workers)
+    builder = Scheduler(workers=args.workers)
     for job in jobs:
         builder.add(job)
     results = asyncio.run(builder.run(), debug=False)

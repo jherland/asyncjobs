@@ -4,13 +4,16 @@ from contextlib import asynccontextmanager
 import logging
 import subprocess
 
-from .scheduler import Scheduler
+from . import basic
 from .util import current_task_name, fate
 
 logger = logging.getLogger(__name__)
 
 
-class ExternalWorkScheduler(Scheduler):
+Job = basic.Job
+
+
+class Scheduler(basic.Scheduler):
     """Manage jobs whose work is done in threads or subprocesses.
 
     Extend Scheduler with methods that allow Job instances to perform work in

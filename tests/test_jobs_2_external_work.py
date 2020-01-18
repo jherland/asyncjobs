@@ -3,7 +3,7 @@ import logging
 import pytest
 from subprocess import CalledProcessError
 
-from jobs import ExternalWorkScheduler
+from jobs import external_work
 
 from conftest import (
     Cancelled,
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(params=[1, 2, 4, 100])
 def scheduler_cls(request):
     logger.info(f'creating scheduler with {request.param} worker threads')
-    yield partial(ExternalWorkScheduler, workers=request.param)
+    yield partial(external_work.Scheduler, workers=request.param)
 
 
 @pytest.fixture

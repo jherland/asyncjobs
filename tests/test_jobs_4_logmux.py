@@ -1,6 +1,6 @@
 import pytest
 
-from jobs import LogMux
+from jobs.logmux import LogMux
 
 pytestmark = pytest.mark.asyncio
 
