@@ -8,22 +8,21 @@ import random
 import sys
 import time
 
-from jobs import external_work
+from jobs import external_work, signal_handling
 from jobs.logmux import LogMux
 
-from conftest import setup_scheduler, TExternalWorkJob
+from conftest import (
+    abort_in,
+    assert_elapsed_time_within,
+    setup_scheduler,
+    TExternalWorkJob,
+)
 
 pytestmark = pytest.mark.asyncio
 
 logger = logging.getLogger(__name__)
 
 sh_helper = Path(__file__).parent / 'test_jobs_5_logmuxed_jobs_helper.sh'
-
-
-@pytest.fixture(params=[1, 2, 4, 100])
-def scheduler_cls(request):
-    logger.info(f'creating scheduler with {request.param} worker threads')
-    yield partial(external_work.Scheduler, workers=request.param)
 
 
 class TJob(TExternalWorkJob):
@@ -149,16 +148,30 @@ class TJob(TExternalWorkJob):
             return await super().__call__(scheduler)
 
 
+@pytest.fixture(params=[1, 2, 4, 100])
+def num_workers(request):
+    return request.param
+
+
+@pytest.fixture
+def scheduler_cls(num_workers):
+    class MyScheduler(signal_handling.Scheduler, external_work.Scheduler):
+        pass
+
+    logger.info(f'creating scheduler with {num_workers} worker threads')
+    yield partial(MyScheduler, workers=num_workers)
+
+
 @pytest.fixture
 def run(scheduler_cls):
-    async def _run(todo, **run_args):
+    async def _run(todo, abort_after=None, **run_args):
         async with LogMux(sys.stdout) as outmux:
             async with LogMux(sys.stderr) as errmux:
                 TJob.outmux = outmux
                 TJob.errmux = errmux
                 with setup_scheduler(scheduler_cls, todo) as scheduler:
-                    result = await scheduler.run(**run_args)
-        return result
+                    with abort_in(abort_after):
+                        return await scheduler.run(**run_args)
 
     return _run
 
@@ -303,6 +316,38 @@ async def test_decorated_output_from_subprocess_worker(run, verify_output):
         [[(outprefix + out).format(name=name)] for name in jobs],
         [[(errprefix + err).format(name=name)] for name in jobs],
     )
+
+
+async def test_decorated_output_from_aborted_processes(
+    num_workers, run, verify_output
+):
+    assert sh_helper.is_file()
+    jobs = ['foo', 'bar', 'baz']
+    out = "This is {name}'s stdout"
+    err = "This is {name}'s stderr"
+
+    todo = [
+        TJob(
+            name,
+            redirect=True,
+            subproc=[
+                str(sh_helper),
+                out.format(name=name),
+                err.format(name=name),
+                '1',  # sleep 1 sec between stdout print and stderr print
+            ],
+        )
+        for name in jobs
+    ]
+    with assert_elapsed_time_within(0.75):
+        await run(todo, abort_after=0.5)
+
+    # We have 3 jobs, but can only run as many concurrently as there are
+    # workers available. The rest will be cancelled before they start their
+    # subprocee
+    outprefix = '{name}/out: '
+    expect_out = [[(outprefix + out).format(name=name)] for name in jobs]
+    assert verify_output(expect_out[:num_workers], [])
 
 
 async def test_decorated_output_from_100_jobs(run, verify_output):
