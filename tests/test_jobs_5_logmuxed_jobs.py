@@ -134,6 +134,13 @@ class TJob(TExternalWorkJob):
                     self.stdout = None
                     self.stderr = None
 
+    async def run_in_subprocess(self, argv, **kwargs):
+        if kwargs.get('stdout') is None:
+            kwargs['stdout'] = self.stdout
+        if kwargs.get('stderr') is None:
+            kwargs['stderr'] = self.stderr
+        return await super().run_in_subprocess(argv, **kwargs)
+
     async def __call__(self, scheduler):
         async with self.setup_stdouterr():
             return await super().__call__(scheduler)

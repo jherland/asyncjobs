@@ -31,7 +31,7 @@ class TimeWaster(Job):
 
     async def __call__(self, scheduler):
         self.dep_results = await super().__call__(scheduler)
-        return await scheduler.call_in_thread(self.do_work)
+        return await self.call_in_thread(self.do_work)
 
 
 class ParallelTimeWaster(TimeWaster):

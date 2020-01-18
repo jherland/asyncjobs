@@ -10,7 +10,27 @@ from .util import current_task_name, fate
 logger = logging.getLogger(__name__)
 
 
-Job = basic.Job
+class Job(basic.Job):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._scheduler = None
+
+    def _start(self, scheduler):
+        self._scheduler = scheduler
+
+    async def __call__(self, scheduler):
+        assert scheduler is self._scheduler
+        return await super().__call__(scheduler)
+
+    async def call_in_thread(self, func, *args):
+        """Call func(*args) in a worker thread and await its result."""
+        assert self._scheduler is not None
+        return await self._scheduler.call_in_thread(func, *args)
+
+    async def run_in_subprocess(self, argv, **kwargs):
+        """Run a command line in a subprocess and await its exit code."""
+        assert self._scheduler is not None
+        return await self._scheduler.run_in_subprocess(argv, **kwargs)
 
 
 class Scheduler(basic.Scheduler):
@@ -27,6 +47,10 @@ class Scheduler(basic.Scheduler):
         self.worker_sem = None
         self.worker_threads = None
         super().__init__(**kwargs)
+
+    def _start_job(self, job):
+        super()._start_job(job)
+        job._start(self)
 
     @asynccontextmanager
     async def reserve_worker(self, caller=None):
@@ -73,14 +97,18 @@ class Scheduler(basic.Scheduler):
                 logger.warning(f'{caller} <- Exception {e} from worker!')
                 raise
 
-    async def run_in_subprocess(self, argv, check=True):
+    async def run_in_subprocess(
+        self, argv, stdin=None, stdout=None, stderr=None, check=True
+    ):
         """Run a command line in a subprocess and await its exit code."""
         caller = current_task_name()
         retcode = None
         async with self.reserve_worker(caller):
             logger.debug(f'{caller} -> starting {argv} in subprocess…')
             self.event('await worker proc', caller, {'argv': argv})
-            proc = await asyncio.create_subprocess_exec(*argv)
+            proc = await asyncio.create_subprocess_exec(
+                *argv, stdin=stdin, stdout=stdout, stderr=stderr
+            )
             try:
                 logger.debug(f'{caller} -- awaiting subprocess…')
                 retcode = await proc.wait()

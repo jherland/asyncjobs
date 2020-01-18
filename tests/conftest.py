@@ -8,7 +8,7 @@ import signal
 from subprocess import CalledProcessError
 import time
 
-from jobs import basic
+from jobs import basic, external_work
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ class TSimpleJob(basic.Job):
             return result
 
 
-class TExternalWorkJob(TSimpleJob):
+class TExternalWorkJob(TSimpleJob, external_work.Job):
     """Test jobs with thread/subprocess capabilities."""
 
     def __init__(
@@ -192,7 +192,7 @@ class TExternalWorkJob(TSimpleJob):
             'await worker thread', may_cancel=True, func=Whatever
         )
         try:
-            ret = await scheduler.call_in_thread(self.thread)
+            ret = await self.call_in_thread(self.thread)
             self._expect_event('awaited worker thread', fate='success')
         except asyncio.CancelledError:
             self._expect_event(
@@ -213,7 +213,7 @@ class TExternalWorkJob(TSimpleJob):
             'await worker proc', may_cancel=True, argv=self.subproc
         )
         try:
-            ret = await scheduler.run_in_subprocess(self.subproc)
+            ret = await self.run_in_subprocess(self.subproc)
             self._expect_event('awaited worker proc', exit=0)
         except asyncio.CancelledError:
             self._expect_event(
