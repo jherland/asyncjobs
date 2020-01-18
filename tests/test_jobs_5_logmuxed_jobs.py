@@ -303,3 +303,99 @@ async def test_decorated_output_from_subprocess_worker(run, verify_output):
         [[(outprefix + out).format(name=name)] for name in jobs],
         [[(errprefix + err).format(name=name)] for name in jobs],
     )
+
+
+async def test_decorated_output_from_100_jobs(run, verify_output):
+    out = "This is {i}'s stdout"
+    err = "This is {i}'s stderr"
+
+    todo = [
+        TJob(
+            f'job #{i}',
+            out=out.format(i=i),
+            err=err.format(i=i),
+            redirect=True,
+        )
+        for i in range(100)
+    ]
+    await run(todo)
+
+    outprefix = 'job #{i}/out: '
+    errprefix = 'job #{i}/ERR: '
+    assert verify_output(
+        [[(outprefix + out).format(i=i)] for i in range(100)],
+        [[(errprefix + err).format(i=i)] for i in range(100)],
+    )
+
+
+async def test_decorated_output_from_100_spawned_jobs(run, verify_output):
+    out = "This is {i}'s stdout"
+    err = "This is {i}'s stderr"
+
+    todo = TJob(
+        'foo',
+        spawn=[
+            TJob(
+                f'job #{i}',
+                out=out.format(i=i),
+                err=err.format(i=i),
+                redirect=True,
+            )
+            for i in range(100)
+        ],
+    )
+    await run([todo])
+
+    outprefix = 'job #{i}/out: '
+    errprefix = 'job #{i}/ERR: '
+    assert verify_output(
+        [[(outprefix + out).format(i=i)] for i in range(100)],
+        [[(errprefix + err).format(i=i)] for i in range(100)],
+    )
+
+
+async def test_decorated_output_from_100_thread_workers(run, verify_output):
+    out = "This is {i}'s stdout"
+    err = "This is {i}'s stderr"
+
+    todo = [
+        TJob(
+            f'job #{i}',
+            out=out.format(i=i),
+            err=err.format(i=i),
+            redirect=True,
+            in_thread=True,
+        )
+        for i in range(100)
+    ]
+    await run(todo)
+
+    outprefix = 'job #{i}/out: '
+    errprefix = 'job #{i}/ERR: '
+    assert verify_output(
+        [[(outprefix + out).format(i=i)] for i in range(100)],
+        [[(errprefix + err).format(i=i)] for i in range(100)],
+    )
+
+
+async def test_decorated_output_from_100_subprocesses(run, verify_output):
+    assert sh_helper.is_file()
+    out = "This is {i}'s stdout"
+    err = "This is {i}'s stderr"
+
+    todo = [
+        TJob(
+            f'job #{i}',
+            redirect=True,
+            subproc=[str(sh_helper), out.format(i=i), err.format(i=i)],
+        )
+        for i in range(100)
+    ]
+    await run(todo)
+
+    outprefix = 'job #{i}/out: '
+    errprefix = 'job #{i}/ERR: '
+    assert verify_output(
+        [[(outprefix + out).format(i=i)] for i in range(100)],
+        [[(errprefix + err).format(i=i)] for i in range(100)],
+    )
