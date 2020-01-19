@@ -317,10 +317,27 @@ def verify_events(scheduler, start_time, actual, todo):
     return True
 
 
+@pytest.fixture(params=[1, 2, 4, 100])
+def num_workers(request):
+    return request.param
+
+
+@pytest.fixture
+def scheduler_with_workers(num_workers):
+    def make_scheduler_class(*bases):
+        class _Scheduler(*bases):
+            pass
+
+        logger.info(f'creating scheduler with {num_workers} worker threads')
+        return partial(_Scheduler, workers=num_workers)
+
+    return make_scheduler_class
+
+
 @contextmanager
-def setup_scheduler(scheduler_cls, todo):
+def setup_scheduler(scheduler_class, todo):
     events = []
-    scheduler = scheduler_cls(event_handler=events.append)
+    scheduler = scheduler_class(event_handler=events.append)
     before = time.time()
     for job in todo:
         scheduler.add(job)

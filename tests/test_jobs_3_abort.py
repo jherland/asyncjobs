@@ -1,4 +1,3 @@
-from functools import partial
 import logging
 import pytest
 
@@ -18,19 +17,14 @@ pytestmark = pytest.mark.asyncio
 logger = logging.getLogger(__name__)
 
 
-@pytest.fixture(params=[1, 2, 4, 100])
-def scheduler_cls(request):
-    class MyScheduler(signal_handling.Scheduler, external_work.Scheduler):
-        pass
-
-    logger.info(f'creating scheduler with {request.param} worker threads')
-    yield partial(MyScheduler, workers=request.param)
-
-
 @pytest.fixture
-def run(scheduler_cls):
+def run(scheduler_with_workers):
+    Scheduler = scheduler_with_workers(
+        signal_handling.Scheduler, external_work.Scheduler
+    )
+
     async def _run(todo, abort_after=None, **run_args):
-        with setup_scheduler(scheduler_cls, todo) as scheduler:
+        with setup_scheduler(Scheduler, todo) as scheduler:
             with abort_in(abort_after):
                 return await scheduler.run(**run_args)
 

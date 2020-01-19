@@ -1,4 +1,3 @@
-from functools import partial
 import logging
 import pytest
 from subprocess import CalledProcessError
@@ -17,16 +16,12 @@ pytestmark = pytest.mark.asyncio
 logger = logging.getLogger(__name__)
 
 
-@pytest.fixture(params=[1, 2, 4, 100])
-def scheduler_cls(request):
-    logger.info(f'creating scheduler with {request.param} worker threads')
-    yield partial(external_work.Scheduler, workers=request.param)
-
-
 @pytest.fixture
-def run(scheduler_cls):
+def run(scheduler_with_workers):
+    Scheduler = scheduler_with_workers(external_work.Scheduler)
+
     async def _run(todo, **run_args):
-        with setup_scheduler(scheduler_cls, todo) as scheduler:
+        with setup_scheduler(Scheduler, todo) as scheduler:
             return await scheduler.run(**run_args)
 
     return _run

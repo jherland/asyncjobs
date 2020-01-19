@@ -1,6 +1,5 @@
 import asyncio
 from contextlib import asynccontextmanager
-from functools import partial
 import logging
 from pathlib import Path
 import pytest
@@ -148,28 +147,18 @@ class TJob(TExternalWorkJob):
             return await super().__call__(scheduler)
 
 
-@pytest.fixture(params=[1, 2, 4, 100])
-def num_workers(request):
-    return request.param
-
-
 @pytest.fixture
-def scheduler_cls(num_workers):
-    class MyScheduler(signal_handling.Scheduler, external_work.Scheduler):
-        pass
+def run(scheduler_with_workers):
+    Scheduler = scheduler_with_workers(
+        signal_handling.Scheduler, external_work.Scheduler
+    )
 
-    logger.info(f'creating scheduler with {num_workers} worker threads')
-    yield partial(MyScheduler, workers=num_workers)
-
-
-@pytest.fixture
-def run(scheduler_cls):
     async def _run(todo, abort_after=None, **run_args):
         async with LogMux(sys.stdout) as outmux:
             async with LogMux(sys.stderr) as errmux:
                 TJob.outmux = outmux
                 TJob.errmux = errmux
-                with setup_scheduler(scheduler_cls, todo) as scheduler:
+                with setup_scheduler(Scheduler, todo) as scheduler:
                     with abort_in(abort_after):
                         return await scheduler.run(**run_args)
 
