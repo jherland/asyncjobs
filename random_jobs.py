@@ -43,11 +43,14 @@ class ParallelTimeWaster(TimeWaster):
         i = 0
         while self.work > self.work_threshold:
             i += 1
-            name = f'{self.name}-{i}'
+            work = random.randint(
+                self.work_threshold * 2 // 3, self.work_threshold
+            )
+            name = f'{self.name}_{i}/{work}'
             self.logger.info(f'Splitting off {name}')
-            scheduler.add(TimeWaster(name=name, work=self.work_threshold))
+            scheduler.add(TimeWaster(name=name, work=work))
             self.deps.add(name)
-            self.work -= self.work_threshold
+            self.work -= work
         return await super().__call__(scheduler)
 
     def do_work(self):
@@ -65,16 +68,18 @@ class RandomJob(ParallelTimeWaster):
     @classmethod
     def generate(cls, dep_prob, max_work=100, work_threshold=None):
         if work_threshold is None:
-            work_threshold = int(max_work / 2)
+            work_threshold = max_work // 2
             assert work_threshold > 0
         names = []
         i = 0
         while True:
-            name = 'random:' + chr(ord('a') + i)
+            letter = chr(ord('a') + i)
+            work = random.randint(0, max_work)
+            name = f'{letter}/{work}'
             yield cls(
                 name=name,
                 deps=set(filter(lambda _: random.random() < dep_prob, names)),
-                work=random.randint(0, max_work),
+                work=work,
                 work_threshold=work_threshold,
             )
             names.append(name)
@@ -119,7 +124,7 @@ def main():
     loglevel = logging.WARNING + 10 * (args.quiet - args.verbose)
     logging.basicConfig(handlers=[handler], level=loglevel)
 
-    print(f'Generating {args.num_jobs} jobs of work <= {args.max_work}…')
+    logger.info(f'Generating {args.num_jobs} jobs of work <= {args.max_work}…')
     random.seed(0)  # deterministic
     job_generator = RandomJob.generate(args.dep_prob, args.max_work)
     jobs = list(itertools.islice(job_generator, args.num_jobs))
@@ -129,7 +134,7 @@ def main():
         builder.add(job)
     results = asyncio.run(builder.run(), debug=False)
     longest_work = max(sum(f.result().values()) for f in results.values())
-    print(f'Finished with max(sum(work)) == {longest_work}')
+    logger.info(f'Finished with max(sum(work)) == {longest_work}')
 
 
 if __name__ == '__main__':
