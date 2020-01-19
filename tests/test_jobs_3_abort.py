@@ -29,7 +29,7 @@ def scheduler_cls(request):
 
 @pytest.fixture
 def run(scheduler_cls):
-    async def _run(todo, abort_after=0, **run_args):
+    async def _run(todo, abort_after=None, **run_args):
         with setup_scheduler(scheduler_cls, todo) as scheduler:
             with abort_in(abort_after):
                 return await scheduler.run(**run_args)

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 @contextmanager
-def abort_in(when=0, assert_on_escape=True):
+def abort_in(when=None, assert_on_escape=True):
     """Simulate Ctrl+C (aka. KeyboardInterrupt/SIGINT) after the given delay.
 
     This will schedule a SIGINT signal in the current process after the given
@@ -26,6 +26,9 @@ def abort_in(when=0, assert_on_escape=True):
     is logged and (unless assert_on_escape is explicitly disabled) an
     assertion is raised (to fail the current test).
     """
+    if when is None:  # Do nothing
+        yield
+        return
 
     async def wait_and_kill():
         await asyncio.sleep(when)
