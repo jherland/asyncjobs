@@ -10,9 +10,10 @@ def plottable_events(events):
         if epoch is None:
             epoch = e['timestamp']
         assert e['timestamp'] >= epoch
-        details = ''
+        wait_for = []
         if e['event'] == 'await results':
-            details = ' ({})'.format(', '.join(sorted(e['jobs'])))
+            wait_for = sorted(e['jobs'])
+        details = ', '.join(wait_for) if wait_for else ''
         if 'job' not in e:
             continue
         yield dict(
@@ -21,6 +22,7 @@ def plottable_events(events):
             dim=e['event'] in {'add', 'await results', 'await worker slot'},
             done=e['event'] == 'finish',
             label=e['event'] + (f' ({details})' if details else ''),
+            wait_for=wait_for,
         )
 
 
@@ -116,10 +118,23 @@ def plot_schedule(
             # 4 corners, clockwise from top-left
             x=[x0, x1, x1, x0],
             y=[y1, y1, y0, y0],
-            text=[a['label']] * 4,
             fill='toself',  # fill area enclosed by above points
             fillcolor=color,
-            hoverinfo='all',
+            hoverinfo='text',
+            text=a['label'],
+        )
+
+    def line(a, ay, b, by, color):
+        """Draw a line from event a at y == ay to event b at y == by."""
+        delta = 0.01
+        return dict(
+            name='',
+            opacity=0.75,
+            mode='lines',
+            x=[a['time'], a['time'] + delta, b['time'] - delta, b['time']],
+            y=[ay, ay, by, by],
+            text=f"{a['task']} -> {b['task']}",
+            line=dict(color=color, width=2, shape='spline', dash='dot'),
         )
 
     last_event_by_task = {}  # map task name -> last event seen for that task
@@ -129,7 +144,12 @@ def plot_schedule(
         color = get_color(task)
         fig.add_trace(marker(e, y, color))
         if task in last_event_by_task:
-            fig.add_trace(rect(last_event_by_task[task], e, y, color))
+            last = last_event_by_task[task]
+            fig.add_trace(rect(last, e, y, color))
+            for t in last['wait_for']:
+                other = last_event_by_task[t]
+                assert other['done']
+                fig.add_trace(line(other, get_row(t), e, y, color))
         last_event_by_task[task] = e
 
     return fig
