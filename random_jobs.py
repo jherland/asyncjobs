@@ -9,6 +9,7 @@ import time
 
 from ansicolors import AnsiColors, AnsiColorFormatter
 from jobs.external_work import Job, Scheduler
+from plot_schedule import plot_schedule
 
 logger = logging.getLogger('random_jobs')
 
@@ -129,12 +130,15 @@ def main():
     job_generator = RandomJob.generate(args.dep_prob, args.max_work)
     jobs = list(itertools.islice(job_generator, args.num_jobs))
 
-    builder = Scheduler(workers=args.workers)
+    events = []
+    builder = Scheduler(workers=args.workers, event_handler=events.append)
     for job in jobs:
         builder.add(job)
     results = asyncio.run(builder.run(), debug=False)
     longest_work = max(sum(f.result().values()) for f in results.values())
     logger.info(f'Finished with max(sum(work)) == {longest_work}')
+
+    plot_schedule(title=' '.join(sys.argv), events=events).show()
 
 
 if __name__ == '__main__':
