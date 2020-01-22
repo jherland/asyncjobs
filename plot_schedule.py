@@ -17,9 +17,9 @@ def plottable_events(events):
         if 'job' not in e:
             continue
         yield dict(
+            event=e['event'],
             task=e['job'],
             time=e['timestamp'] - epoch,
-            dim=e['event'] in {'add', 'await results', 'await worker slot'},
             done=e['event'] == 'finish',
             label=e['event'] + (f' ({details})' if details else ''),
             wait_for=wait_for,
@@ -90,6 +90,19 @@ def plot_schedule(
 
     def marker(event, y, color):
         """Draw a marker for the given event."""
+        symbol = {
+            'add': 'star',
+            'start': 'diamond-wide-open',
+            'await results': 'diamond-tall-open',
+            'awaited results': 'diamond-wide-open',
+            'await worker slot': 'diamond-tall-open',
+            'awaited worker slot': 'diamond-wide-open',
+            'await worker thread': 'triangle-right',
+            'awaited worker thread': 'triangle-left',
+            'await worker proc': 'triangle-right',
+            'awaited worker proc': 'triangle-left',
+            'finish': 'x',
+        }
         return dict(
             name='',  # event['task'],
             legendgroup=event['task'],
@@ -98,7 +111,11 @@ def plot_schedule(
             x=[event['time']],
             y=[y],
             text=[event['label']],
-            marker=dict(symbol='diamond-open', color=color),
+            marker=dict(
+                symbol=symbol.get(event['event'], 'square'),
+                size=10,
+                color=color,
+            ),
         )
 
     def rect(a, b, y, color):
@@ -109,10 +126,22 @@ def plot_schedule(
         assert a['task'] == b['task']
         x0, x1 = a['time'], b['time']
         y0, y1 = y - bar_width, y + bar_width
+        opacity = {
+            'add': 0.2,
+            'start': 0.6,
+            'await results': 0.2,
+            'awaited results': 0.6,
+            'await worker slot': 0.2,
+            'awaited worker slot': 0.6,
+            'await worker thread': 0.8,
+            'awaited worker thread': 0.6,
+            'await worker proc': 0.8,
+            'awaited worker proc': 0.6,
+        }
         return dict(
             name=a['task'],
             legendgroup=a['task'],
-            opacity=0.1 if a['dim'] else 0.7,
+            opacity=opacity.get(a['event'], 1),
             mode='none',
             # ids=[...]
             # 4 corners, clockwise from top-left
