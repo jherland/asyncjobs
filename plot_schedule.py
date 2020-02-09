@@ -155,15 +155,14 @@ def plot_schedule(
 
     def line(a, ay, b, by, color):
         """Draw a line from event a at y == ay to event b at y == by."""
-        delta = 0.01
         return dict(
             name='',
             opacity=0.75,
             mode='lines',
-            x=[a['time'], a['time'] + delta, b['time'] - delta, b['time']],
-            y=[ay, ay, by, by],
+            x=[b['time'], a['time']],
+            y=[by, ay],
             text=f"{a['task']} -> {b['task']}",
-            line=dict(color=color, width=2, shape='spline', dash='dot'),
+            line=dict(color=color, width=2, shape='hv', dash='dot'),
         )
 
     last_event_by_task = {}  # map task name -> last event seen for that task
