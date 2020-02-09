@@ -1,0 +1,8 @@
+# Regular deps
+-r requirements.txt
+
+# For running the test suite
+flake8
+black
+pytest
+pytest-asyncio

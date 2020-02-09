@@ -4,22 +4,21 @@
 with import <nixpkgs> {};
 
 stdenv.mkDerivation {
-  name = "asyncio_builder-environment";
+  name = "asyncio_builder-env";
   buildInputs = [
     # Python requirements (enough to get a virtualenv going).
     python37
-    pipenv
   ];
   src = null;
   shellHook = ''
     # Allow the use of wheels.
-    SOURCE_DATE_EPOCH=$(date +%s)
+    unset SOURCE_DATE_EPOCH
 
-    # Prevent "ModuleNotFoundError: No module named 'pip._internal.main'"
-    export PYTHONPATH=$(pipenv --venv)/lib/python3.7/site-packages/:$PYTHONPATH
+    # Setup up virtualenv for development
+    python -m venv --clear .venv
+    source .venv/bin/activate
 
-    # Install Pipfile dependencies
-    ${pipenv}/bin/pipenv install --dev
-    ${pipenv}/bin/pipenv shell
+    # Install project deps
+    pip install -r requirements-dev.txt
   '';
 }
