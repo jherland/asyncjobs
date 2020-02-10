@@ -4,7 +4,7 @@
 with import <nixpkgs> {};
 
 stdenv.mkDerivation {
-  name = "asyncio_builder-env";
+  name = "asyncjobs-env";
   buildInputs = [
     # Python requirements (enough to get a virtualenv going).
     python37

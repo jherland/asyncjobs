@@ -1,7 +1,7 @@
 import logging
 import pytest
 
-from jobs import external_work, signal_handling
+from asyncjobs import external_work, signal_handling
 
 from conftest import (
     abort_in,

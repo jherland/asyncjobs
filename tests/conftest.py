@@ -8,7 +8,7 @@ import signal
 from subprocess import CalledProcessError
 import time
 
-from jobs import basic, external_work
+from asyncjobs import basic, external_work
 
 logger = logging.getLogger(__name__)
 

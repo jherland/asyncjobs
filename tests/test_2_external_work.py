@@ -2,7 +2,7 @@ import logging
 import pytest
 from subprocess import CalledProcessError
 
-from jobs import external_work
+from asyncjobs import external_work
 
 from conftest import (
     Cancelled,

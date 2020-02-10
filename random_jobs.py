@@ -8,7 +8,7 @@ import sys
 import time
 
 from ansicolors import AnsiColors, AnsiColorFormatter
-from jobs.external_work import Job, Scheduler
+from asyncjobs.external_work import Job, Scheduler
 from plot_schedule import plot_schedule
 
 logger = logging.getLogger('random_jobs')

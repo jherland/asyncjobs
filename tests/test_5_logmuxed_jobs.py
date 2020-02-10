@@ -7,8 +7,8 @@ import random
 import sys
 import time
 
-from jobs import external_work, signal_handling
-from jobs.logmux import LogMux
+from asyncjobs import external_work, signal_handling
+from asyncjobs.logmux import LogMux
 
 from conftest import (
     abort_in,
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.asyncio
 
 logger = logging.getLogger(__name__)
 
-sh_helper = Path(__file__).parent / 'test_jobs_5_logmuxed_jobs_helper.sh'
+sh_helper = Path(__file__).parent / 'test_5_logmuxed_jobs_helper.sh'
 
 
 class TJob(TExternalWorkJob):

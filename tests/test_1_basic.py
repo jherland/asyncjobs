@@ -1,6 +1,6 @@
 import pytest
 
-from jobs.basic import Scheduler
+from asyncjobs.basic import Scheduler
 
 from conftest import (
     Cancelled,
