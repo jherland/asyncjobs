@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Create random jobs that sleep in threads, and plot their scheduling."""
+
 import argparse
 import asyncio
 import itertools
@@ -88,7 +90,7 @@ class RandomJob(ParallelTimeWaster):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('num_jobs', type=int, help='Number of jobs to run')
     parser.add_argument(
         'dep_prob',
