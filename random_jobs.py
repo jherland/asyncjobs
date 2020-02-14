@@ -9,7 +9,6 @@ import random
 import sys
 import time
 
-from ansicolors import AnsiColors, AnsiColorFormatter
 from asyncjobs.external_work import Job, Scheduler
 from asyncjobs.plot_schedule import plot_schedule
 
@@ -113,10 +112,9 @@ def main():
     )
     args = parser.parse_args()
 
-    formatter = AnsiColorFormatter if AnsiColors.enabled else logging.Formatter
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(
-        formatter(
+        logging.Formatter(
             fmt=(
                 '{relativeCreated:8.0f} {process:5}/{threadName:10} '
                 '{name:>16}: {message}'
