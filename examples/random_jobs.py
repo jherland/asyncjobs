@@ -5,12 +5,15 @@ import argparse
 import asyncio
 import itertools
 import logging
+from pathlib import Path
 import random
 import sys
 import time
 
-from asyncjobs.external_work import Job, Scheduler
-from asyncjobs.plot_schedule import plot_schedule
+sys.path.append(str(Path(__file__).parent.parent))
+
+from asyncjobs.external_work import Job, Scheduler  # noqa: E402
+from asyncjobs.plot_schedule import plot_schedule  # noqa: E402
 
 logger = logging.getLogger('random_jobs')
 
