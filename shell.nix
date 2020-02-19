@@ -1,5 +1,5 @@
 # Run nix-shell without arguments to enter an environment with all the
-# following stuff in place.
+# project dependencies in place.
 
 with import <nixpkgs> {};
 
@@ -19,6 +19,6 @@ stdenv.mkDerivation {
     source .venv/bin/activate
 
     # Install project deps
-    pip install -r requirements-dev.txt
+    pip install -e .\[dev\] -e .\[plot\]
   '';
 }

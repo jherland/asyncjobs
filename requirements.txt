@@ -1,3 +1,0 @@
-# For plotting schedules
-plotly
-numpy
