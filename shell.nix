@@ -7,7 +7,7 @@ stdenv.mkDerivation {
   name = "asyncjobs-env";
   buildInputs = [
     # Python requirements (enough to get a virtualenv going).
-    python37
+    python38
   ];
   src = null;
   shellHook = ''
