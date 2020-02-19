@@ -158,7 +158,7 @@ class Scheduler:
             results = dict(zip(job_names, await asyncio.gather(*tasks)))
         except Exception:
             logger.info(f'{caller} cancelled due to failure(s) in {job_names}')
-            raise concurrent.futures.CancelledError
+            raise asyncio.CancelledError
         self.event('awaited results', caller)
         logger.debug(f'{caller} <- {results} from .results()')
         return results
