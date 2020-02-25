@@ -3,6 +3,7 @@ import concurrent.futures
 from contextlib import asynccontextmanager
 import logging
 import subprocess
+from typing import Any, Callable, List
 
 from . import basic
 from .util import current_task_name, fate
@@ -11,6 +12,12 @@ logger = logging.getLogger(__name__)
 
 
 class Job(basic.Job):
+    # Override _one_ of these in a subclass or instance to have it
+    # automatically invoked by the default __call__() implementation.
+    # For anything more advanced, please override __call__() instead.
+    thread_func: Callable[[], Any] = NotImplemented
+    subprocess_argv: List[str] = NotImplemented
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._scheduler = None
@@ -20,7 +27,12 @@ class Job(basic.Job):
 
     async def __call__(self, scheduler):
         assert scheduler is self._scheduler
-        return await super().__call__(scheduler)
+        ret = await super().__call__(scheduler)
+        if self.thread_func is not NotImplemented:
+            ret = await self.call_in_thread(self.thread_func)
+        elif self.subprocess_argv is not NotImplemented:
+            ret = await self.run_in_subprocess(self.subprocess_argv)
+        return ret
 
     async def call_in_thread(self, func, *args):
         """Call func(*args) in a worker thread and await its result."""
