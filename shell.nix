@@ -1,24 +1,22 @@
 # Run nix-shell without arguments to enter an environment with all the
 # project dependencies in place.
+{
+  pkgs ? import (builtins.fetchGit {
+    url = "https://github.com/NixOS/nixpkgs-channels/";
+    ref = "nixos-20.03";
+  }) {}
+}:
 
-with import <nixpkgs> {};
-
-stdenv.mkDerivation {
-  name = "asyncjobs-env";
+let
+  pythonPackages = pkgs.python38Packages;
+in pkgs.mkShell {
+  venvDir = "./.venv";
   buildInputs = [
-    # Python requirements (enough to get a virtualenv going).
-    python38
+    pkgs.git
+    pythonPackages.python
+    pythonPackages.venvShellHook
   ];
-  src = null;
-  shellHook = ''
-    # Allow the use of wheels.
-    unset SOURCE_DATE_EPOCH
-
-    # Setup up virtualenv for development
-    python -m venv --clear .venv
-    source .venv/bin/activate
-
-    # Install project deps
-    pip install -e .\[dev\] -e .\[plot\]
+  postShellHook = ''
+    pip install -e .\[dev,plot,examples\]
   '';
 }
