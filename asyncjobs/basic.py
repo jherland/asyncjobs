@@ -90,6 +90,9 @@ class Scheduler:
         self.running = False
         self.event_handler = event_handler
 
+    def __contains__(self, job_name):
+        return job_name in self.jobs
+
     def event(self, event, job_name=None, info=None):
         if self.event_handler is None:
             return
