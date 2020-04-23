@@ -6,7 +6,6 @@ import subprocess
 from typing import Any, Callable, List
 
 from . import basic
-from .util import fate
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +98,9 @@ class Scheduler(basic.Scheduler):
                 )
                 future.add_done_callback(
                     lambda f: self.event(
-                        'awaited worker thread', caller, {'fate': fate(f)}
+                        'awaited worker thread',
+                        caller,
+                        {'fate': self._fate(f)},
                     )
                 )
                 result = await future

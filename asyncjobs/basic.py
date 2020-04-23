@@ -3,8 +3,6 @@ import concurrent.futures
 import logging
 import time
 
-from .util import fate
-
 logger = logging.getLogger(__name__)
 
 
@@ -107,11 +105,25 @@ class Scheduler:
         except asyncio.QueueFull:
             logger.error('Failed to post event: {d}')
 
+    @staticmethod
+    def _fate(future):
+        """Return a word describing the state of the given future."""
+        if not future.done():
+            return 'unfinished'
+        elif future.cancelled():
+            return 'cancelled'
+        elif future.exception() is not None:
+            return 'failed'
+        else:
+            return 'success'
+
     def _start_job(self, job):
         self.tasks[job.name] = asyncio.create_task(job(self), name=job.name)
         self.event('start', job.name)
         self.tasks[job.name].add_done_callback(
-            lambda task: self.event('finish', job.name, {'fate': fate(task)})
+            lambda task: self.event(
+                'finish', job.name, {'fate': self._fate(task)}
+            )
         )
 
     def add(self, job):
