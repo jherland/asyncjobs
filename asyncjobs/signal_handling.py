@@ -5,7 +5,6 @@ import logging
 import signal
 
 from . import basic
-from .util import current_task
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,7 @@ class Scheduler(basic.Scheduler):
     @contextmanager
     def _handle_signals(self):
         loop = asyncio.get_running_loop()
-        sched_task = current_task()
+        sched_task = asyncio.current_task()
         for signum in self.handle_signals:
             handler = partial(self._caught_signal, signum, sched_task)
             loop.add_signal_handler(

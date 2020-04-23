@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+import contextlib
 import logging
 import os
 from pathlib import Path
@@ -49,7 +49,7 @@ class LogMux:
         await self.q.put(('unwatch', path))
         await self.q.join()
 
-    @asynccontextmanager
+    @contextlib.asynccontextmanager
     async def new_stream(self, decorator=None):
         """Context manager wrapping .watched_fifo() and .unwatch()."""
         path = await self.watched_fifo(decorator)
@@ -78,10 +78,7 @@ class LogMux:
                 self.out = out
                 self.paths = {}  # map path -> (f, decorator)
                 self.running = False
-                try:
-                    self.loop = asyncio.get_running_loop()  # added in v3.7
-                except AttributeError:
-                    self.loop = asyncio.get_event_loop()
+                self.loop = asyncio.get_running_loop()
 
             def _do_read(self, f, decorator):
                 while True:

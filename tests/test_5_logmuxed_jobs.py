@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+import contextlib
 import logging
 from pathlib import Path
 import pytest
@@ -102,7 +102,7 @@ class TJob(TExternalWorkJob):
 
             return print_async
 
-    @asynccontextmanager
+    @contextlib.asynccontextmanager
     async def setup_stdouterr(self, redirect_logger=False):
         if not self.redirect:  # do nothing
             self.stdout = sys.stdout

@@ -1,3 +1,4 @@
+from . import polyfill  # noqa: F401
 from . import external_work, signal_handling
 
 

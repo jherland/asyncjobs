@@ -3,7 +3,7 @@ import concurrent.futures
 import logging
 import time
 
-from .util import current_task_name, fate
+from .util import fate
 
 logger = logging.getLogger(__name__)
 
@@ -108,16 +108,8 @@ class Scheduler:
             logger.error('Failed to post event: {d}')
 
     def _start_job(self, job):
-        if hasattr(asyncio.Task, 'get_name'):  # Added in Python v3.8
-            self.tasks[job.name] = asyncio.create_task(
-                job(self), name=job.name
-            )
-        else:
-            task = asyncio.ensure_future(job(self))  # .create_task() in >=v3.7
-            task.job_name = job.name
-            self.tasks[job.name] = task
+        self.tasks[job.name] = asyncio.create_task(job(self), name=job.name)
         self.event('start', job.name)
-
         self.tasks[job.name].add_done_callback(
             lambda task: self.event('finish', job.name, {'fate': fate(task)})
         )
@@ -147,7 +139,7 @@ class Scheduler:
         CancelledError here to cancel the calling job.
         """
         assert self.running
-        caller = current_task_name()
+        caller = asyncio.current_task().get_name()
         tasks = [self.tasks[n] for n in job_names]
         pending = [n for n, t in zip(job_names, tasks) if not t.done()]
         self.event(

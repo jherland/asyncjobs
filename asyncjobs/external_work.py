@@ -1,12 +1,12 @@
 import asyncio
 import concurrent.futures
-from contextlib import asynccontextmanager
+import contextlib
 import logging
 import subprocess
 from typing import Any, Callable, List
 
 from . import basic
-from .util import current_task_name, fate
+from .util import fate
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class Scheduler(basic.Scheduler):
         super()._start_job(job)
         job._start(self)
 
-    @asynccontextmanager
+    @contextlib.asynccontextmanager
     async def reserve_worker(self, caller=None):
         """Acquire a worker context where the caller can run its own work.
 
@@ -84,7 +84,7 @@ class Scheduler(basic.Scheduler):
 
     async def call_in_thread(self, func, *args):
         """Call func(*args) in a worker thread and await its result."""
-        caller = current_task_name()
+        caller = asyncio.current_task().get_name()
         async with self.reserve_worker(caller):
             if self.worker_threads is None:
                 self.worker_threads = concurrent.futures.ThreadPoolExecutor(
@@ -113,7 +113,7 @@ class Scheduler(basic.Scheduler):
         self, argv, stdin=None, stdout=None, stderr=None, check=True
     ):
         """Run a command line in a subprocess and await its exit code."""
-        caller = current_task_name()
+        caller = asyncio.current_task().get_name()
         retcode = None
         async with self.reserve_worker(caller):
             logger.debug(f'{caller} -> starting {argv} in subprocess…')
