@@ -8,7 +8,7 @@
 }:
 
 let
-  pythonPackages = pkgs.python38Packages;
+  pythonPackages = pkgs.python36Packages;
 in pkgs.mkShell {
   venvDir = "./.venv";
   buildInputs = [
