@@ -39,9 +39,9 @@ setup(
             "flake8",
             "pytest",
             "pytest-asyncio",
+            "requests",
             #  "twine",
         ],
-        "examples": ["requests"],
         "plot": ["plotly", "numpy"],
     },
 )

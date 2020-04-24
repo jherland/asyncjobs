@@ -17,6 +17,6 @@ in pkgs.mkShell {
     pythonPackages.venvShellHook
   ];
   postShellHook = ''
-    pip install -e .\[dev,plot,examples\]
+    pip install -e .\[dev,plot\]
   '';
 }
