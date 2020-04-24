@@ -10,7 +10,6 @@ import sys
 import time
 
 from asyncjobs import Job, Scheduler
-from asyncjobs.plot_schedule import plot_schedule
 
 logger = logging.getLogger('random_jobs')
 
@@ -156,6 +155,8 @@ def main():
     print(f'Finished with max(sum(work)) == {longest_work}')
 
     if args.plot:
+        from asyncjobs.plot_schedule import plot_schedule
+
         plot_schedule(title=' '.join(sys.argv), events=events).show()
 
 

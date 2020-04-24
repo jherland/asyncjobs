@@ -2,7 +2,6 @@
 # Fetch a random wikipedia article and follow links from it
 import asyncio
 from asyncjobs import Job, Scheduler
-from asyncjobs.plot_schedule import plot_schedule
 import requests
 import sys
 import xml.etree.ElementTree as ET
@@ -59,6 +58,8 @@ scheduler = Scheduler(workers=num_workers, event_handler=events.append)
 scheduler.add(Fetcher(Article.random_url))
 asyncio.run(scheduler.run())
 if 'plot' in sys.argv:
+    from asyncjobs.plot_schedule import plot_schedule
+
     plot_schedule(
         f'Fetch {num_articles} Wikipedia articles with {num_workers} workers',
         events,
