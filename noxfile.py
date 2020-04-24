@@ -5,3 +5,15 @@ import nox
 def tests(session):
     session.install(".[test]")
     session.run("pytest", "-x", "--log-level=debug")
+
+
+@nox.session
+def format(session):
+    session.install("black")
+    session.run(
+        "black",
+        "--target-version=py36",
+        "--line-length=79",
+        "--skip-string-normalization",
+        ".",
+    )
