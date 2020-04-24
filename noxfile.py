@@ -17,3 +17,9 @@ def format(session):
         "--skip-string-normalization",
         ".",
     )
+
+
+@nox.session
+def lint(session):
+    session.install("flake8")
+    session.run("flake8")
