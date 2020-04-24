@@ -90,19 +90,36 @@ class RandomJob(ParallelTimeWaster):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('num_jobs', type=int, help='Number of jobs to run')
+    parser.add_argument(
+        'num_jobs',
+        type=int,
+        nargs='?',
+        default=10,
+        help='Number of jobs to run',
+    )
     parser.add_argument(
         'dep_prob',
         type=float,
+        nargs='?',
+        default=0.5,
         help='Probability of depending on each preceding job',
     )
     parser.add_argument(
-        'max_work', type=int, help='Max duration of each job (msecs)'
+        'max_work',
+        type=int,
+        nargs='?',
+        default=100,
+        help='Max duration of each job (msecs)',
     )
     parser.add_argument(
         'workers',
         type=int,
+        nargs='?',
+        default=4,
         help='How many workers (<0: #procs, 0: synchronous, >0: #threads)',
+    )
+    parser.add_argument(
+        '-p', '--plot', action='store_true', help='Plot job schedule'
     )
     parser.add_argument(
         '-v', '--verbose', action='count', default=0, help='Increase log level'
@@ -125,7 +142,7 @@ def main():
     loglevel = logging.WARNING + 10 * (args.quiet - args.verbose)
     logging.basicConfig(handlers=[handler], level=loglevel)
 
-    logger.info(f'Generating {args.num_jobs} jobs of work <= {args.max_work}…')
+    print(f'Generating {args.num_jobs} jobs of work <= {args.max_work}…')
     random.seed(0)  # deterministic
     job_generator = RandomJob.generate(args.dep_prob, args.max_work)
     jobs = list(itertools.islice(job_generator, args.num_jobs))
@@ -136,9 +153,10 @@ def main():
         builder.add(job)
     results = asyncio.run(builder.run(), debug=False)
     longest_work = max(sum(f.result().values()) for f in results.values())
-    logger.info(f'Finished with max(sum(work)) == {longest_work}')
+    print(f'Finished with max(sum(work)) == {longest_work}')
 
-    plot_schedule(title=' '.join(sys.argv), events=events).show()
+    if args.plot:
+        plot_schedule(title=' '.join(sys.argv), events=events).show()
 
 
 if __name__ == '__main__':
