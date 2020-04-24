@@ -15,6 +15,7 @@ pkgs.mkShell {
     python36Packages.venvShellHook
     python37
     python38
+    python39
   ];
   postShellHook = ''
     pip install -e .\[dev,plot,test\]
