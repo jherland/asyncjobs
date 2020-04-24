@@ -91,11 +91,14 @@ a development environment:
 $ nix-shell
 ```
 
-Use the `run_tests.sh` script to run all tests:
+Use `nox` to run all tests, formatters and linters:
 
 ```bash
-$ ./run_tests.sh
+$ nox
 ```
+
+This will run the test suite under all supported Python versions, format the
+code with `black` and run the `flake8` linter.
 
 ## Contributing
 
