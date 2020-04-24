@@ -1,8 +1,9 @@
 # Python
+/.nox/
+/.venv/
 __pycache__/
 
 # Python distribution/packaging
-/.venv/
 /build/
 /dist/
 *.egg-info/

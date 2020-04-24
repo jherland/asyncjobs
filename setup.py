@@ -37,11 +37,10 @@ setup(
             "black",
             #  "check-manifest",
             "flake8",
-            "pytest",
-            "pytest-asyncio",
-            "requests",
+            "nox",
             #  "twine",
         ],
         "plot": ["plotly", "numpy"],
+        "test": ["pytest", "pytest-asyncio", "requests"],
     },
 )

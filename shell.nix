@@ -7,16 +7,16 @@
   }) {}
 }:
 
-let
-  pythonPackages = pkgs.python36Packages;
-in pkgs.mkShell {
+pkgs.mkShell {
   venvDir = "./.venv";
-  buildInputs = [
-    pkgs.git
-    pythonPackages.python
-    pythonPackages.venvShellHook
+  buildInputs = with pkgs; [
+    git
+    python36
+    python36Packages.venvShellHook
+    python37
+    python38
   ];
   postShellHook = ''
-    pip install -e .\[dev,plot\]
+    pip install -e .\[dev,plot,test\]
   '';
 }
