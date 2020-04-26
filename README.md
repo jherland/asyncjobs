@@ -25,7 +25,8 @@ and remaining tasks as quickly and cleanly as possible.
 
 ## Usage
 
-Run three simple jobs in sequence:
+Run three simple jobs in sequence
+([code also available here](examples/simple_usage.py)):
 
 ```python
 import asyncio
