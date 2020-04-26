@@ -91,14 +91,15 @@ a development environment:
 $ nix-shell
 ```
 
-Use `nox` to run all tests, formatters and linters:
+Use [`nox`](https://nox.thea.codes/) to run all tests, formatters and linters:
 
 ```bash
 $ nox
 ```
 
 This will run the test suite under all supported Python versions, format the
-code with `black` and run the `flake8` linter.
+code with [`black`](https://black.readthedocs.io/) and run the
+[`flake8`](https://flake8.pycqa.org/) linter.
 
 ## Contributing
 
