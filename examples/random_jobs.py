@@ -115,7 +115,7 @@ def main():
         type=int,
         nargs='?',
         default=4,
-        help='How many workers (<0: #procs, 0: synchronous, >0: #threads)',
+        help='Max number of parallel workers',
     )
     parser.add_argument(
         '-p', '--plot', action='store_true', help='Plot job schedule'

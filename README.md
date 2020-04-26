@@ -23,9 +23,9 @@ automatically cancelled by the scheduler if that other job fails.
 The Scheduler handles cancellation (e.g. _Ctrl-C_) by cancelling all ongoing
 and remaining tasks as quickly and cleanly as possible.
 
-## Usage
+## Usage examples
 
-Run three simple jobs in sequence
+### Run three simple jobs in sequence
 ([code also available here](examples/simple_usage.py)):
 
 ```python
@@ -66,6 +66,48 @@ Tue Feb 25 16:35:58 2020: Sleep for a second
 Tue Feb 25 16:35:59 2020: Finished sleep
  16:35:59  up 9 days  3:29,  1 user,  load average: 0.62, 0.55, 0.55
 ```
+
+### Fetching web content in parallel
+
+[This example](examples/random_wikipedia.py) fetches a random Wikipedia
+article, and then follows links to other articles until 10 articles have
+been fetched. Sample output:
+
+```
+    fetching https://en.wikipedia.org/wiki/Special:Random...
+  * [Indonesia–Mongolia relations] links to 7 articles
+      fetching https://en.wikipedia.org/wiki/Indonesia...
+      fetching https://en.wikipedia.org/wiki/Mongolia...
+      fetching https://en.wikipedia.org/wiki/Jakarta...
+      fetching https://en.wikipedia.org/wiki/Mongolian_National_University,_Ulan_Bator...
+    * [Mongolia] links to 529 articles
+      fetching https://en.wikipedia.org/wiki/Sukarno...
+    * [Indonesia] links to 697 articles
+      fetching https://en.wikipedia.org/wiki/Megawati_Soekarnoputri...
+    * [Jakarta] links to 757 articles
+      fetching https://en.wikipedia.org/wiki/Susilo_Bambang_Yudhoyono...
+    * [Mongolian National University] links to 2 articles
+        fetching https://en.wikipedia.org/wiki/Mongolian_language...
+    * [Sukarno] links to 523 articles
+        fetching https://en.wikipedia.org/wiki/Mongolian_script...
+    * [Susilo Bambang Yudhoyono] links to 159 articles
+    * [Megawati Sukarnoputri] links to 88 articles
+      * [Mongolian language] links to 259 articles
+      * [Mongolian script] links to 142 articles
+
+```
+
+### Wasting time efficiently across multiple threads
+
+[The final example](examples/random_jobs.py) (which was used to produce the
+schedule plot above) simulates a simple build system: It creates a number of
+jobs (default: 10), each job sleeps for some random time (default: <=100ms),
+and has some probability of depending on each preceding job (default: 0.5).
+After awaiting its dependencies, each job may also split portions of its work
+into one or more sub-jobs, and await their completion, before finishing its
+remaining work. Everything is scheduled across a fixed number of worker
+threads (default: 4).
+
 
 ## Installation
 
