@@ -108,7 +108,6 @@ into one or more sub-jobs, and await their completion, before finishing its
 remaining work. Everything is scheduled across a fixed number of worker
 threads (default: 4).
 
-
 ## Installation
 
 Run the following to install:
@@ -127,8 +126,17 @@ and run tests:
 $ pip install -e .[dev]
 ```
 
-Alternatively, if you are using Nix, simply use the bundled `shell.nix` to get
-a development environment:
+Additionally, if you want to generate scheduling plots (as seen above), you
+need a couple more dependencies ([plotly])(https://plotly.com/python/) and
+[numpy](https://numpy.org/)):
+
+```bash
+$ pip install -e .[dev,plot]
+```
+
+Alternatively, if you are using [Nix](https://nixos.org/nix/), use the included
+`shell.nix` to get a development environment with everything automatically
+installed:
 
 ```bash
 $ nix-shell
