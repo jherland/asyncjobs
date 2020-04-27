@@ -26,7 +26,6 @@ and remaining tasks as quickly and cleanly as possible.
 ## Usage examples
 
 ### Run three simple jobs in sequence
-([code also available here](examples/simple_usage.py)):
 
 ```python
 import asyncio
@@ -58,6 +57,8 @@ for job in [job1, job2, job3]:
 asyncio.run(s.run())
 ```
 
+([code also available here](
+https://github.com/jherland/asyncjobs/blob/master/examples/simple_usage.py))
 should produce output like this:
 
 ```
@@ -69,9 +70,10 @@ Tue Feb 25 16:35:59 2020: Finished sleep
 
 ### Fetching web content in parallel
 
-[This example](examples/random_wikipedia.py) fetches a random Wikipedia
-article, and then follows links to other articles until 10 articles have
-been fetched. Sample output:
+[This example](
+https://github.com/jherland/asyncjobs/blob/master/examples/random_wikipedia.py)
+fetches a random Wikipedia article, and then follows links to other articles
+until 10 articles have been fetched. Sample output:
 
 ```
     fetching https://en.wikipedia.org/wiki/Special:Random...
@@ -99,14 +101,15 @@ been fetched. Sample output:
 
 ### Wasting time efficiently across multiple threads
 
-[The final example](examples/random_jobs.py) (which was used to produce the
-schedule plot above) simulates a simple build system: It creates a number of
-jobs (default: 10), each job sleeps for some random time (default: <=100ms),
-and has some probability of depending on each preceding job (default: 0.5).
-After awaiting its dependencies, each job may also split portions of its work
-into one or more sub-jobs, and await their completion, before finishing its
-remaining work. Everything is scheduled across a fixed number of worker
-threads (default: 4).
+[The final example](
+https://github.com/jherland/asyncjobs/blob/master/examples/random_jobs.py)
+(which was used to produce the schedule plot above) simulates a simple build
+system: It creates a number of jobs (default: 10), each job sleeps for some
+random time (default: <=100ms), and has some probability of depending on each
+preceding job (default: 0.5). After awaiting its dependencies, each job may
+also split portions of its work into one or more sub-jobs, and await their
+completion, before finishing its remaining work. Everything is scheduled
+across a fixed number of worker threads (default: 4).
 
 ## Installation
 
@@ -127,8 +130,8 @@ $ pip install -e .[dev]
 ```
 
 Additionally, if you want to generate scheduling plots (as seen above), you
-need a couple more dependencies ([plotly])(https://plotly.com/python/) and
-[numpy](https://numpy.org/)):
+need a couple more dependencies ([`plotly`](https://plotly.com/python/) and
+[`numpy`](https://numpy.org/)):
 
 ```bash
 $ pip install -e .[dev,plot]
