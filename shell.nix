@@ -18,6 +18,7 @@ pkgs.mkShell {
     python39
   ];
   postShellHook = ''
-    pip install -e .\[dev,plot,test\]
+    unset SOURCE_DATE_EPOCH
+    pip install -e .\[dev,dist,plot,test\]
   '';
 }

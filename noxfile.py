@@ -1,5 +1,8 @@
 import nox
 
+# Run everything but 'dist' by default
+nox.options.keywords = "not dist"
+
 
 @nox.session(python=["3.6", "3.7", "3.8", "3.9"])
 def tests(session):
@@ -23,3 +26,12 @@ def format(session):
 def lint(session):
     session.install("flake8")
     session.run("flake8")
+
+
+@nox.session
+def dist(session):
+    session.install(".[dist]")
+    session.run("check-manifest")
+    session.run("rm", "-rf", "dist/*")
+    session.run("python", "setup.py", "bdist_wheel", "sdist")
+    session.run("twine", "upload", "dist/*")

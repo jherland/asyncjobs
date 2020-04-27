@@ -1,0 +1,7 @@
+include *.nix
+include *.py
+include LICENSE
+recursive-include examples *.png
+recursive-include examples *.py
+recursive-include tests *.py
+recursive-include tests *.sh

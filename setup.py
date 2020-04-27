@@ -33,14 +33,9 @@ setup(
     python_requires=">=3.6",
     install_requires=[],
     extras_require={
-        "dev": [
-            "black",
-            #  "check-manifest",
-            "flake8",
-            "nox",
-            #  "twine",
-        ],
-        "plot": ["plotly", "numpy"],
+        "dev": ["black", "flake8", "nox"],
+        "dist": ["check-manifest", "twine", "wheel"],
+        "plot": ["numpy", "plotly"],
         "test": ["pytest", "pytest-asyncio", "requests"],
     },
 )
