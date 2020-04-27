@@ -5,7 +5,7 @@ with open("README.md") as f:
 
 setup(
     name="asyncjobs",
-    version="0.1",
+    version="0.1.1",
     description="Asynchronous job scheduler",
     long_description=long_description,
     long_description_content_type="text/markdown",

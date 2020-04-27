@@ -35,3 +35,4 @@ def dist(session):
     session.run("rm", "-rf", "dist/*")
     session.run("python", "setup.py", "bdist_wheel", "sdist")
     session.run("twine", "upload", "dist/*")
+    print("*** Don't forget to tag and push!")
