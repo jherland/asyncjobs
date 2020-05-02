@@ -3,7 +3,10 @@
 Asynchronous job scheduler.
 Using asyncio to run jobs in worker threads/processes.
 
-![](https://github.com/jherland/asyncjobs/workflows/tests/badge.svg)
+[![tests](https://github.com/jherland/asyncjobs/workflows/tests/badge.svg)](
+https://github.com/jherland/asyncjobs/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](
+https://opensource.org/licenses/MIT)
 
 ## Description
 
