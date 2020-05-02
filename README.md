@@ -1,6 +1,9 @@
 # asyncjobs
 
 Asynchronous job scheduler.
+Using asyncio to run jobs in worker threads/processes.
+
+![](https://github.com/jherland/asyncjobs/workflows/tests/badge.svg)
 
 ## Description
 
