@@ -1,12 +1,16 @@
 # asyncjobs
 
-Asynchronous job scheduler.
-Using asyncio to run jobs in worker threads/processes.
-
-[![tests](https://github.com/jherland/asyncjobs/workflows/tests/badge.svg)](
+[![Tests](https://github.com/jherland/asyncjobs/workflows/tests/badge.svg)](
 https://github.com/jherland/asyncjobs/actions)
+[![PyPI version](https://badge.fury.io/py/asyncjobs.svg)](
+https://badge.fury.io/py/asyncjobs)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/asyncjobs)](
+https://pypi.org/project/asyncjobs/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](
 https://opensource.org/licenses/MIT)
+
+Asynchronous job scheduler.
+Using asyncio to run jobs in worker threads/processes.
 
 ## Description
 
