@@ -2,6 +2,8 @@
 
 [![Tests](https://github.com/jherland/asyncjobs/workflows/tests/badge.svg)](
 https://github.com/jherland/asyncjobs/actions)
+[![Build Status](https://travis-ci.org/jherland/asyncjobs.svg?branch=master)](
+https://travis-ci.org/jherland/asyncjobs)
 [![PyPI version](https://badge.fury.io/py/asyncjobs.svg)](
 https://badge.fury.io/py/asyncjobs)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/asyncjobs)](
