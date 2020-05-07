@@ -35,7 +35,7 @@ def abort_in(when=None, assert_on_escape=True):
         logger.warning('Raising SIGINT to simulate Ctrl+C…')
         os.kill(os.getpid(), signal.SIGINT)
 
-    task = asyncio.ensure_future(wait_and_kill())  # .create_task() in >=v3.7
+    task = asyncio.create_task(wait_and_kill())
     try:
         yield
     except KeyboardInterrupt:

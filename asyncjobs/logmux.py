@@ -130,9 +130,7 @@ class LogMux:
         await Muxer(self.q, self.out).run()
 
     async def __aenter__(self):
-        self._task = asyncio.ensure_future(  # .create_task() in >=v3.7
-            self.service()
-        )
+        self._task = asyncio.create_task(self.service())
         return self
 
     async def __aexit__(self, *_):
