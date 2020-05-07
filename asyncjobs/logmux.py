@@ -17,6 +17,7 @@ class LogMux:
         self.q = asyncio.Queue()
         self.tempdir = TemporaryDirectory(dir=tmp_base, prefix='LogMux_')
         self.fifonum = 0
+        self._task = None
 
     async def _watch(self, path, decorator=None):
         """Add the given 'path' to be watched by LogMux.
@@ -130,10 +131,13 @@ class LogMux:
         await Muxer(self.q, self.out).run()
 
     async def __aenter__(self):
+        assert self._task is None
         self._task = asyncio.create_task(self.service())
         return self
 
     async def __aexit__(self, *_):
+        assert self._task is not None
         assert not self._task.done()
         await self.shutdown()
         await self._task
+        self._task = None
