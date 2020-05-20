@@ -21,11 +21,8 @@ class Job(basic.Job):
         super().__init__(*args, **kwargs)
         self._scheduler = None
 
-    def _start(self, scheduler):
-        self._scheduler = scheduler
-
     async def __call__(self, scheduler):
-        assert scheduler is self._scheduler
+        self._scheduler = scheduler
         ret = await super().__call__(scheduler)
         if self.thread_func is not NotImplemented:
             ret = await self.call_in_thread(self.thread_func)
@@ -58,10 +55,6 @@ class Scheduler(basic.Scheduler):
         self.worker_sem = None
         self.worker_threads = None
         super().__init__(**kwargs)
-
-    def _start_job(self, job):
-        super()._start_job(job)
-        job._start(self)
 
     @contextlib.asynccontextmanager
     async def reserve_worker(self, caller=None):
