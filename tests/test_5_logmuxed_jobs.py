@@ -1,14 +1,11 @@
 import asyncio
-import contextlib
 import logging
 from pathlib import Path
 import pytest
 import random
-import sys
 import time
 
-from asyncjobs import external_work, signal_handling
-from asyncjobs.logmux import LogMux
+from asyncjobs import logmuxed_work, signal_handling
 
 from conftest import (
     abort_in,
@@ -24,34 +21,42 @@ logger = logging.getLogger(__name__)
 sh_helper = Path(__file__).parent / 'test_5_logmuxed_jobs_helper.sh'
 
 
-class TJob(TExternalWorkJob):
-    outmux = None
-    errmux = None
-
+class TJob(logmuxed_work.Job, TExternalWorkJob):
     def __init__(
         self,
         *args,
         out=None,
         err=None,
         in_thread=False,
-        redirect=False,
+        decorate=False,
+        redirect_logger=False,
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, redirect_logger=redirect_logger, **kwargs)
         # out/err are strings or lists of strings. If strings, the chars in the
         # string will be printed one-by-one, if lists of strings, each string
-        # will be printed. See .print_out_and_err() below for details.
+        # will be printed. See ._print_out_and_err() below for details.
         self.out = out
         self.err = err
-        self.redirect = redirect
-        self.stdout = None
-        self.stderr = None
+        self.decorate = decorate
         if in_thread:
-            self.thread = self.print_out_and_err(True)
+            self.thread = self._print_out_and_err(True)
         elif 'subproc' not in kwargs:
-            self.do_work = self.print_out_and_err(False)
+            self.do_work = self._print_out_and_err(False)
 
-    def print_out_and_err(self, sync):
+    def decorate_out(self, msg):
+        if self.decorate:
+            return f'{self.name}/out: {msg.rstrip()}\n'
+        else:
+            return msg
+
+    def decorate_err(self, msg):
+        if self.decorate:
+            return f'{self.name}/ERR: {msg.rstrip()}\n'
+        else:
+            return msg
+
+    def _print_out_and_err(self, sync):
         # Try really hard to provoke any issues we might have regarding
         # rescheduling/ordering of tasks and whatnot: Return a sync/async
         # callable that prints one item (char or string) from either self.out
@@ -102,65 +107,17 @@ class TJob(TExternalWorkJob):
 
             return print_async
 
-    @contextlib.asynccontextmanager
-    async def setup_stdouterr(self, redirect_logger=False):
-        if not self.redirect:  # do nothing
-            self.stdout = sys.stdout
-            self.stderr = sys.stderr
-            try:
-                yield
-            finally:
-                self.stdout = None
-                self.stderr = None
-            return
-
-        def decorate_out(line):
-            return f'{self.name}/out: {line.rstrip()}\n'
-
-        def decorate_err(line):
-            return f'{self.name}/ERR: {line.rstrip()}\n'
-
-        async with self.outmux.new_stream(decorate_out) as outf:
-            async with self.errmux.new_stream(decorate_err) as errf:
-                self.stdout = outf
-                self.stderr = errf
-                if redirect_logger:
-                    log_handler = logging.StreamHandler(self.stderr)
-                    self.logger.addHandler(log_handler)
-                try:
-                    yield
-                finally:
-                    if redirect_logger:
-                        self.logger.removeHandler(log_handler)
-                    self.stdout = None
-                    self.stderr = None
-
-    async def run_in_subprocess(self, argv, **kwargs):
-        if kwargs.get('stdout') is None:
-            kwargs['stdout'] = self.stdout
-        if kwargs.get('stderr') is None:
-            kwargs['stderr'] = self.stderr
-        return await super().run_in_subprocess(argv, **kwargs)
-
-    async def __call__(self, scheduler):
-        async with self.setup_stdouterr():
-            return await super().__call__(scheduler)
-
 
 @pytest.fixture
 def run(scheduler_with_workers):
     Scheduler = scheduler_with_workers(
-        signal_handling.Scheduler, external_work.Scheduler
+        signal_handling.Scheduler, logmuxed_work.Scheduler
     )
 
     async def _run(todo, abort_after=None, **run_args):
-        async with LogMux(sys.stdout) as outmux:
-            async with LogMux(sys.stderr) as errmux:
-                TJob.outmux = outmux
-                TJob.errmux = errmux
-                with setup_scheduler(Scheduler, todo) as scheduler:
-                    with abort_in(abort_after):
-                        return await scheduler.run(**run_args)
+        with setup_scheduler(Scheduler, todo) as scheduler:
+            with abort_in(abort_after):
+                return await scheduler.run(**run_args)
 
     return _run
 
@@ -202,7 +159,7 @@ async def test_decorated_output_from_two_jobs(run, verify_output):
             name,
             out=out.format(name=name),
             err=err.format(name=name),
-            redirect=True,
+            decorate=True,
         )
         for name in jobs
     ]
@@ -221,19 +178,19 @@ async def test_decorated_output_from_spawned_jobs(run, verify_output):
         'foo',
         out="This is foo's stdout",
         err="This is foo's stderr",
-        redirect=True,
+        decorate=True,
         spawn=[
             TJob(
                 'bar',
                 out="This is bar's stdout",
                 err="This is bar's stderr",
-                redirect=True,
+                decorate=True,
                 spawn=[
                     TJob(
                         'baz',
                         out="This is baz's stdout",
                         err="This is baz's stderr",
-                        redirect=True,
+                        decorate=True,
                     )
                 ],
             )
@@ -264,7 +221,7 @@ async def test_decorated_output_from_thread_worker(run, verify_output):
             name,
             out=out.format(name=name),
             err=err.format(name=name),
-            redirect=True,
+            decorate=True,
             in_thread=True,
         )
         for name in jobs
@@ -288,7 +245,7 @@ async def test_decorated_output_from_subprocess_worker(run, verify_output):
     todo = [
         TJob(
             name,
-            redirect=True,
+            decorate=True,
             subproc=[
                 str(sh_helper),
                 out.format(name=name),
@@ -318,7 +275,7 @@ async def test_decorated_output_from_aborted_processes(
     todo = [
         TJob(
             name,
-            redirect=True,
+            decorate=True,
             subproc=[
                 str(sh_helper),
                 out.format(name=name),
@@ -348,7 +305,7 @@ async def test_decorated_output_from_100_jobs(run, verify_output):
             f'job #{i}',
             out=out.format(i=i),
             err=err.format(i=i),
-            redirect=True,
+            decorate=True,
         )
         for i in range(100)
     ]
@@ -373,7 +330,7 @@ async def test_decorated_output_from_100_spawned_jobs(run, verify_output):
                 f'job #{i}',
                 out=out.format(i=i),
                 err=err.format(i=i),
-                redirect=True,
+                decorate=True,
             )
             for i in range(100)
         ],
@@ -397,7 +354,7 @@ async def test_decorated_output_from_100_thread_workers(run, verify_output):
             f'job #{i}',
             out=out.format(i=i),
             err=err.format(i=i),
-            redirect=True,
+            decorate=True,
             in_thread=True,
         )
         for i in range(100)
@@ -420,7 +377,7 @@ async def test_decorated_output_from_100_subprocesses(run, verify_output):
     todo = [
         TJob(
             f'job #{i}',
-            redirect=True,
+            decorate=True,
             subproc=[str(sh_helper), out.format(i=i), err.format(i=i)],
         )
         for i in range(100)
