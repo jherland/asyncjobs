@@ -171,7 +171,7 @@ class Scheduler:
         return results
 
     async def _run_tasks(self, return_when):
-        logger.info(f'Waiting for all jobs to complete…')
+        logger.info('Waiting for all jobs to complete…')
         self.event('await tasks', info={'jobs': list(self.tasks.keys())})
         try:
             while True:

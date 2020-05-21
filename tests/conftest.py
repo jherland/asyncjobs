@@ -134,7 +134,7 @@ class TSimpleJob(basic.Job):
         if self.async_sleep:
             self.logger.info(f'Async sleep for {self.async_sleep} seconds…')
             await asyncio.sleep(self.async_sleep)
-            self.logger.info(f'Finished async sleep')
+            self.logger.info('Finished async sleep')
 
         result = await self.do_work(scheduler)
 

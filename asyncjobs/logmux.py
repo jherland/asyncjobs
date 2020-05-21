@@ -113,7 +113,7 @@ class LogMux:
                 self._do_read(f, decorator)
 
             def shutdown(self):
-                logger.debug(f'Shutting down')
+                logger.debug('Shutting down')
                 for path in sorted(self.paths.keys()):
                     logger.warning(f'{path} was not unwatched!')
                     self.unwatch(path)
