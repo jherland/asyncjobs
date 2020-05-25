@@ -97,7 +97,7 @@ class Scheduler(basic.Scheduler):
                     )
                 )
                 result = await future
-                logger.debug(f'{caller} <- {result} from worker')
+                logger.debug(f'{caller} <- {result!r} from worker')
                 return result
             except Exception as e:
                 logger.warning(f'{caller} <- Exception {e} from worker!')

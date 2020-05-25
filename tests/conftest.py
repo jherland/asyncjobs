@@ -156,7 +156,7 @@ class TSimpleJob(basic.Job):
             self._expect_event('finish', fate='failed')
             raise result
         else:
-            self.logger.info(f'Returning result: {result}')
+            self.logger.info(f'Returning result: {result!r}')
             self._expect_event('finish', fate='success')
             return result
 
@@ -205,7 +205,7 @@ class TExternalWorkJob(TSimpleJob, external_work.Job):
         except Exception as e:
             ret = e
             self._expect_event('awaited worker thread', fate='failed')
-        self.logger.debug(f'Finished thread call: {ret}')
+        self.logger.debug(f'Finished thread call: {ret!r}')
         return ret
 
     async def _do_subproc_stuff(self, scheduler):
