@@ -18,7 +18,7 @@ pytestmark = pytest.mark.asyncio
 
 logger = logging.getLogger(__name__)
 
-sh_helper = Path(__file__).parent / 'test_5_logmuxed_jobs_helper.sh'
+sh_helper = Path(__file__).parent / 'test_5_logmuxed_work_helper.sh'
 
 
 class TJob(logmuxed_work.Job, TExternalWorkJob):
