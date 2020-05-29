@@ -91,14 +91,13 @@ class Scheduler:
     def __contains__(self, job_name):
         return job_name in self.jobs
 
-    def event(self, event, job_name=None, info=None):
+    def event(self, event, job_name=None, **kwargs):
         if self.event_handler is None:
             return
         d = {'timestamp': time.time(), 'event': event}
         if job_name is not None:
             d['job'] = job_name
-        if info is not None:
-            d.update(info)
+        d.update(kwargs)
         logger.debug(f'Posting event: {d}')
         self.event_handler(d)
 
@@ -118,9 +117,7 @@ class Scheduler:
         self.tasks[job.name] = asyncio.create_task(job(self), name=job.name)
         self.event('start', job.name)
         self.tasks[job.name].add_done_callback(
-            lambda task: self.event(
-                'finish', job.name, {'fate': self._fate(task)}
-            )
+            lambda task: self.event('finish', job.name, fate=self._fate(task))
         )
 
     def add(self, job):
@@ -152,9 +149,7 @@ class Scheduler:
         tasks = [self.tasks[n] for n in job_names]
         pending = [n for n, t in zip(job_names, tasks) if not t.done()]
         self.event(
-            'await results',
-            caller,
-            {'jobs': list(job_names), 'pending': pending},
+            'await results', caller, jobs=list(job_names), pending=pending
         )
         if pending:
             logger.debug(f'{caller} is waiting for {", ".join(pending)}…')
@@ -169,7 +164,7 @@ class Scheduler:
 
     async def _run_tasks(self, return_when):
         logger.info('Waiting for all jobs to complete…')
-        self.event('await tasks', info={'jobs': list(self.tasks.keys())})
+        self.event('await tasks', jobs=list(self.tasks.keys()))
         try:
             while True:
                 # Await the tasks that are currently running. More tasks may be
@@ -218,10 +213,7 @@ class Scheduler:
         or cancelled state).
         """
         logger.debug('Running…')
-        self.event(
-            'start',
-            info={'keep_going': keep_going, 'num_jobs': len(self.jobs)},
-        )
+        self.event('start', keep_going=keep_going, num_jobs=len(self.jobs))
         if keep_going:
             return_when = concurrent.futures.ALL_COMPLETED
         else:
@@ -237,5 +229,5 @@ class Scheduler:
             self.running = False
         else:
             logger.warning('Nothing to do!')
-        self.event('finish', info={'num_tasks': len(self.tasks)})
+        self.event('finish', num_tasks=len(self.tasks))
         return self.tasks

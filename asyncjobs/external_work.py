@@ -85,15 +85,13 @@ class Scheduler(basic.Scheduler):
                 )
             try:
                 logger.debug(f'{caller} -> awaiting worker thread…')
-                self.event('await worker thread', caller, {'func': str(func)})
+                self.event('await worker thread', caller, func=str(func))
                 future = asyncio.get_running_loop().run_in_executor(
                     self.worker_threads, func, *args
                 )
                 future.add_done_callback(
                     lambda f: self.event(
-                        'awaited worker thread',
-                        caller,
-                        {'fate': self._fate(f)},
+                        'awaited worker thread', caller, fate=self._fate(f)
                     )
                 )
                 result = await future
@@ -111,7 +109,7 @@ class Scheduler(basic.Scheduler):
         retcode = None
         async with self.reserve_worker(caller):
             logger.debug(f'{caller} -> starting {argv} in subprocess…')
-            self.event('await worker proc', caller, {'argv': argv})
+            self.event('await worker proc', caller, argv=argv)
             proc = await asyncio.create_subprocess_exec(
                 *argv, stdin=stdin, stdout=stdout, stderr=stderr
             )
@@ -131,7 +129,7 @@ class Scheduler(basic.Scheduler):
                     logger.debug(f'{caller} cancelled! {proc} killed.')
                 raise
             finally:
-                self.event('awaited worker proc', caller, {'exit': retcode})
+                self.event('awaited worker proc', caller, exit=retcode)
         if check and retcode != 0:
             raise subprocess.CalledProcessError(retcode, argv)
         return retcode
