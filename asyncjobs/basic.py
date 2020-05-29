@@ -100,10 +100,7 @@ class Scheduler:
         if info is not None:
             d.update(info)
         logger.debug(f'Posting event: {d}')
-        try:
-            self.event_handler(d)
-        except asyncio.QueueFull:
-            logger.error('Failed to post event: {d}')
+        self.event_handler(d)
 
     @staticmethod
     def _fate(future):
