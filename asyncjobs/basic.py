@@ -43,8 +43,6 @@ class Job:
     def __init__(self, name, *, deps=None):
         self.name = name
         self.deps = set() if deps is None else set(deps)
-        self.logger = logging.getLogger(name)
-        self.logger.debug(f'Created {self.__class__.__name__}: {self}')
 
     def __str__(self):
         return self.name
@@ -67,7 +65,7 @@ class Job:
         Raises CancelledError if any dependency has failed.
         """
         if self.deps:
-            self.logger.debug(f'Awaiting dependencies {self.deps}…')
+            ctx.logger.debug(f'Awaiting dependencies {self.deps}…')
             return await ctx.results(*self.deps)
         return {}
 

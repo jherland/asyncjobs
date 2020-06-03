@@ -111,12 +111,12 @@ class TBasicJob(basic.Job):
         dep_results = await super().__call__(ctx)
         if self.deps:
             self.xevents.add('awaited results')
-        self.logger.debug(f'Results from deps: {dep_results}')
+        ctx.logger.debug(f'Results from deps: {dep_results}')
 
         if self.async_sleep:
-            self.logger.info(f'Async sleep for {self.async_sleep} seconds…')
+            ctx.logger.info(f'Async sleep for {self.async_sleep} seconds…')
             await asyncio.sleep(self.async_sleep)
-            self.logger.info('Finished async sleep')
+            ctx.logger.info('Finished async sleep')
 
         result = await self.do_work(ctx)
 
@@ -134,11 +134,11 @@ class TBasicJob(basic.Job):
             assert not ctx._scheduler.tasks[b].done()  # but not yet finished
 
         if isinstance(result, Exception):
-            self.logger.info(f'Raising exception: {result}')
+            ctx.logger.info(f'Raising exception: {result}')
             self.xevents.add('finish', fate='failed')
             raise result
         else:
-            self.logger.info(f'Returning result: {result!r}')
+            ctx.logger.info(f'Returning result: {result!r}')
             self.xevents.add('finish', fate='success')
             return result
 
@@ -170,7 +170,7 @@ class TExternalWorkJob(TBasicJob, external_work.Job):
             self.subproc = subproc
 
     async def _do_thread_stuff(self, ctx):
-        self.logger.debug(f'Await call {self.thread} in thread…')
+        ctx.logger.debug(f'Await call {self.thread} in thread…')
         self.xevents.add('await worker slot')
         self.xevents.add('awaited worker slot', may_cancel=True)
         self.xevents.add('await worker thread', may_cancel=True, func=Whatever)
@@ -185,11 +185,11 @@ class TExternalWorkJob(TBasicJob, external_work.Job):
         except Exception as e:
             ret = e
             self.xevents.add('awaited worker thread', fate='failed')
-        self.logger.debug(f'Finished thread call: {ret!r}')
+        ctx.logger.debug(f'Finished thread call: {ret!r}')
         return ret
 
     async def _do_subproc_stuff(self, ctx):
-        self.logger.debug(f'Await run {self.subproc} in subprocess…')
+        ctx.logger.debug(f'Await run {self.subproc} in subprocess…')
         self.xevents.add('await worker slot')
         self.xevents.add('awaited worker slot', may_cancel=True)
         self.xevents.add(
@@ -209,7 +209,7 @@ class TExternalWorkJob(TBasicJob, external_work.Job):
                 self.xevents.add(
                     'awaited worker proc', returncode=e.returncode
                 )
-        self.logger.debug(f'Finished subprocess run: {ret}')
+        ctx.logger.debug(f'Finished subprocess run: {ret}')
         return ret
 
     async def do_work(self, ctx):

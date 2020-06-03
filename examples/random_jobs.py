@@ -18,21 +18,21 @@ class TimeWaster(Job):
     def __init__(self, work, **kwargs):
         self.work = work
         super().__init__(**kwargs)
-        self.logger.info(self)
 
     def __str__(self):
         deps = ', '.join(sorted(self.deps))
         return f'{super().__str__()}[{deps}]/{self.work}'
 
-    def do_work(self):
-        self.logger.info(f'Doing own work: {self.work}')
+    def do_work(self, ctx):
+        ctx.logger.info(f'Doing own work: {self.work}')
         time.sleep(self.work / 1000)
-        self.logger.info(f'Finished own work: {self.work}')
+        ctx.logger.info(f'Finished own work: {self.work}')
         return {self.name: self.work}
 
     async def __call__(self, ctx):
+        ctx.logger.info(self)
         self.dep_results = await super().__call__(ctx)
-        return await ctx.call_in_thread(self.do_work)
+        return await ctx.call_in_thread(self.do_work, ctx)
 
 
 class ParallelTimeWaster(TimeWaster):
@@ -48,20 +48,20 @@ class ParallelTimeWaster(TimeWaster):
                 self.work_threshold * 2 // 3, self.work_threshold
             )
             name = f'{self.name}_{i}/{work}'
-            self.logger.info(f'Splitting off {name}')
+            ctx.logger.info(f'Splitting off {name}')
             ctx.add_job(TimeWaster(name=name, work=work))
             self.deps.add(name)
             self.work -= work
         return await super().__call__(ctx)
 
-    def do_work(self):
+    def do_work(self, ctx):
         result = {}
-        self.logger.info('From deps:')
+        ctx.logger.info('From deps:')
         for dep, dep_result in self.dep_results.items():
-            self.logger.info(f'  {dep}: {dep_result}')
+            ctx.logger.info(f'  {dep}: {dep_result}')
             result.update(dep_result)
-        result.update(super().do_work())
-        self.logger.info(f'Returning {result}')
+        result.update(super().do_work(ctx))
+        ctx.logger.info(f'Returning {result}')
         return result
 
 
