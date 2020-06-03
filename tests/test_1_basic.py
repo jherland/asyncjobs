@@ -5,7 +5,7 @@ from asyncjobs.basic import Scheduler
 from conftest import (
     Cancelled,
     scheduler_session,
-    TSimpleJob,
+    TBasicJob,
     verify_tasks,
 )
 
@@ -17,7 +17,7 @@ async def run(todo, **run_args):
         return await scheduler.run(**run_args)
 
 
-TJob = TSimpleJob
+TJob = TBasicJob
 
 
 async def test_zero_jobs_does_nothing():

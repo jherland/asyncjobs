@@ -62,7 +62,7 @@ def assert_elapsed_time_within(time_limit):
         assert after < before + time_limit
 
 
-class TSimpleJob(basic.Job):
+class TBasicJob(basic.Job):
     """Async jobs with test instrumentation."""
 
     def __init__(
@@ -143,7 +143,7 @@ class TSimpleJob(basic.Job):
             return result
 
 
-class TExternalWorkJob(TSimpleJob, external_work.Job):
+class TExternalWorkJob(TBasicJob, external_work.Job):
     """Test jobs with thread/subprocess capabilities."""
 
     def __init__(
@@ -239,7 +239,7 @@ def scheduler_session(scheduler_class, todo):
     """Instantiate a Scheduler and run the 'todo' jobs on it.
 
     Automatically verify the events emitted by the scheduler agaist the events
-    expected by the TSimpleJob instances in 'todo'.
+    expected by the TBasicJob instances in 'todo'.
     """
     initial_xevents = [j.xevents for j in todo]
     spawned_xevents = [
