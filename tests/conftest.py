@@ -197,14 +197,18 @@ class TExternalWorkJob(TBasicJob, external_work.Job):
         )
         try:
             ret = await self.run_in_subprocess(self.subproc)
-            self.xevents.add('awaited worker proc', exit=0)
+            self.xevents.add('awaited worker proc', returncode=0)
         except asyncio.CancelledError:
-            self.xevents.add('awaited worker proc', may_cancel=True, exit=-15)
+            self.xevents.add(
+                'awaited worker proc', may_cancel=True, returncode=-15
+            )
             raise
         except Exception as e:
             ret = e
             if isinstance(e, CalledProcessError):
-                self.xevents.add('awaited worker proc', exit=e.returncode)
+                self.xevents.add(
+                    'awaited worker proc', returncode=e.returncode
+                )
         self.logger.debug(f'Finished subprocess run: {ret}')
         return ret
 

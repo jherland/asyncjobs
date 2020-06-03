@@ -111,7 +111,7 @@ class Context(basic.Context):
                     self.logger.debug(f'Cancelled! {proc} killed.')
                 raise
             finally:
-                self.event('awaited worker proc', exit=returncode)
+                self.event('awaited worker proc', returncode=returncode)
         if check and returncode != 0:
             raise subprocess.CalledProcessError(returncode, argv)
         return returncode
