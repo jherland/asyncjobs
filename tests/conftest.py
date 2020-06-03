@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import contextmanager
 from functools import partial
+import itertools
 import logging
 import os
 import pytest
@@ -9,6 +10,8 @@ from subprocess import CalledProcessError
 import time
 
 from asyncjobs import basic, external_work
+
+from verify_events import EventVerifier, ExpectedJobEvents, Whatever
 
 logger = logging.getLogger(__name__)
 
@@ -59,20 +62,6 @@ def assert_elapsed_time_within(time_limit):
         assert after < before + time_limit
 
 
-# Wildcard used for don't-care values in expected event fields
-Whatever = object()
-
-
-def verify_event(expect, actual):
-    expect_keys = set(expect.keys()) - {'MAY_CANCEL'}
-    assert expect_keys == set(actual.keys())
-    keys = sorted(expect_keys)
-    for e, a in zip((expect[k] for k in keys), (actual[k] for k in keys)):
-        if e is not Whatever:
-            assert e == a
-    return True
-
-
 class TSimpleJob(basic.Job):
     """Async jobs with test instrumentation."""
 
@@ -96,16 +85,14 @@ class TSimpleJob(basic.Job):
         self.await_spawn = await_spawn
         self.result = '{} done'.format(name) if result is None else result
 
-        self._expected_events = []
-        self._expect_event('add'),
-        self._expect_event('start'),
+        self.xevents = ExpectedJobEvents(name)
+        self.xevents.add('add')
+        self.xevents.add('start')
 
-    def _expect_event(self, event, *, may_cancel=False, **kwargs):
-        d = {'event': event, 'job': self.name, 'timestamp': Whatever}
-        d.update(kwargs)
-        if may_cancel:
-            d['MAY_CANCEL'] = True
-        self._expected_events.append(d)
+    def descendants(self):
+        for spawn in self.spawn:
+            yield spawn
+            yield from spawn.descendants()
 
     async def do_work(self, scheduler):
         result = None
@@ -113,22 +100,17 @@ class TSimpleJob(basic.Job):
             result = self.call()
         return self.result if result is None else result
 
-    def expected_events(self):
-        if self._expected_events[-1]['event'] != 'finish':  # we were cancelled
-            self._expect_event('finish', fate='cancelled')
-        return self._expected_events
-
     async def __call__(self, scheduler):
         if self.deps:
             if self.deps == {'MISSING'}:
-                self._expect_event('finish', fate='failed')  # expect KeyError
+                self.xevents.add('finish', fate='failed')  # expect KeyError
             else:
-                self._expect_event(
+                self.xevents.add(
                     'await results', jobs=list(self.deps), pending=Whatever
                 )
         dep_results = await super().__call__(scheduler)
         if self.deps:
-            self._expect_event('awaited results')
+            self.xevents.add('awaited results')
         self.logger.debug(f'Results from deps: {dep_results}')
 
         if self.async_sleep:
@@ -143,9 +125,9 @@ class TSimpleJob(basic.Job):
 
         if self.await_spawn and self.spawn:
             spawn = [job.name for job in self.spawn]
-            self._expect_event('await results', jobs=spawn, pending=spawn)
+            self.xevents.add('await results', jobs=spawn, pending=spawn)
             await scheduler.results(*[job.name for job in self.spawn])
-            self._expect_event('awaited results')
+            self.xevents.add('awaited results')
 
         for b in self.before:
             assert b in scheduler.tasks  # The other job has been started
@@ -153,11 +135,11 @@ class TSimpleJob(basic.Job):
 
         if isinstance(result, Exception):
             self.logger.info(f'Raising exception: {result}')
-            self._expect_event('finish', fate='failed')
+            self.xevents.add('finish', fate='failed')
             raise result
         else:
             self.logger.info(f'Returning result: {result!r}')
-            self._expect_event('finish', fate='success')
+            self.xevents.add('finish', fate='success')
             return result
 
 
@@ -189,44 +171,40 @@ class TExternalWorkJob(TSimpleJob, external_work.Job):
 
     async def _do_thread_stuff(self, scheduler):
         self.logger.debug(f'Await call {self.thread} in thread…')
-        self._expect_event('await worker slot')
-        self._expect_event('awaited worker slot', may_cancel=True)
-        self._expect_event(
-            'await worker thread', may_cancel=True, func=Whatever
-        )
+        self.xevents.add('await worker slot')
+        self.xevents.add('awaited worker slot', may_cancel=True)
+        self.xevents.add('await worker thread', may_cancel=True, func=Whatever)
         try:
             ret = await self.call_in_thread(self.thread)
-            self._expect_event('awaited worker thread', fate='success')
+            self.xevents.add('awaited worker thread', fate='success')
         except asyncio.CancelledError:
-            self._expect_event(
+            self.xevents.add(
                 'awaited worker thread', may_cancel=True, fate='cancelled',
             )
             raise
         except Exception as e:
             ret = e
-            self._expect_event('awaited worker thread', fate='failed')
+            self.xevents.add('awaited worker thread', fate='failed')
         self.logger.debug(f'Finished thread call: {ret!r}')
         return ret
 
     async def _do_subproc_stuff(self, scheduler):
         self.logger.debug(f'Await run {self.subproc} in subprocess…')
-        self._expect_event('await worker slot')
-        self._expect_event('awaited worker slot', may_cancel=True)
-        self._expect_event(
+        self.xevents.add('await worker slot')
+        self.xevents.add('awaited worker slot', may_cancel=True)
+        self.xevents.add(
             'await worker proc', may_cancel=True, argv=self.subproc
         )
         try:
             ret = await self.run_in_subprocess(self.subproc)
-            self._expect_event('awaited worker proc', exit=0)
+            self.xevents.add('awaited worker proc', exit=0)
         except asyncio.CancelledError:
-            self._expect_event(
-                'awaited worker proc', may_cancel=True, exit=-15
-            )
+            self.xevents.add('awaited worker proc', may_cancel=True, exit=-15)
             raise
         except Exception as e:
             ret = e
             if isinstance(e, CalledProcessError):
-                self._expect_event('awaited worker proc', exit=e.returncode)
+                self.xevents.add('awaited worker proc', exit=e.returncode)
         self.logger.debug(f'Finished subprocess run: {ret}')
         return ret
 
@@ -237,84 +215,6 @@ class TExternalWorkJob(TSimpleJob, external_work.Job):
         if self.subproc:
             result = await self._do_subproc_stuff(scheduler)
         return result
-
-
-def verify_events(scheduler, start_time, actual, todo):
-    after = time.time()
-    num_jobs = len(todo)
-    num_tasks = len(scheduler.tasks)
-    expect = {j.name: j.expected_events() for j in todo}
-
-    # Timestamps are in sorted order and all between 'start_time' and 'after'
-    timestamps = [e['timestamp'] for e in actual]
-    assert timestamps == sorted(timestamps)
-    assert timestamps[0] >= start_time
-    assert timestamps[-1] <= after
-
-    # Initial jobs are added before execution starts
-    expect_adds = [e.pop(0) for e in expect.values()]
-    for e, a in zip(expect_adds, actual[:num_jobs]):
-        assert verify_event(e, a)
-    actual = actual[num_jobs:]
-
-    # Overall execution start and finish
-    overall_start, overall_finish = actual.pop(0), actual.pop()
-    assert verify_event(
-        {
-            'event': 'start',
-            'num_jobs': num_jobs,
-            'keep_going': Whatever,
-            'timestamp': Whatever,
-        },
-        overall_start,
-    )
-    assert verify_event(
-        {'event': 'finish', 'num_tasks': num_tasks, 'timestamp': Whatever},
-        overall_finish,
-    )
-
-    if expect:
-        # Jobs are started
-        expect_starts = [e.pop(0) for e in expect.values()]
-        for e, a in zip(expect_starts, actual[:num_jobs]):
-            assert verify_event(e, a)
-        actual = actual[num_jobs:]
-
-        # Await task execution
-        await_tasks, awaited_tasks = actual.pop(0), actual.pop()
-        assert verify_event(
-            {
-                'event': 'await tasks',
-                'jobs': [j.name for j in todo],
-                'timestamp': Whatever,
-            },
-            await_tasks,
-        )
-        assert verify_event(
-            {'event': 'awaited tasks', 'timestamp': Whatever}, awaited_tasks,
-        )
-
-        # Remaining events belong to individual tasks
-        # This includes expected events from tasks that were spawned from
-        # other tasks (hence not part of the original 'todo').
-        for name, job in scheduler.jobs.items():
-            if name not in expect:  # job was spawned after .run()
-                expect[name] = job.expected_events()
-        # Verify each event by pairing it w/that job's next expected event
-        while actual:
-            a = actual.pop(0)
-            job_name = a['job']
-            e = expect[job_name].pop(0)
-            if a['event'] == 'finish' and a['fate'] == 'cancelled':
-                while e.get('MAY_CANCEL', False):
-                    e = expect[job_name].pop(0)
-            assert verify_event(e, a)
-
-        # No more expected events
-        assert all(len(e) == 0 for e in expect.values())
-
-    assert not actual  # no more actual events
-    return True
 
 
 @pytest.fixture(params=[1, 2, 4, 100])
@@ -336,13 +236,22 @@ def scheduler_with_workers(num_workers):
 
 @contextmanager
 def scheduler_session(scheduler_class, todo):
-    events = []
-    scheduler = scheduler_class(event_handler=events.append)
-    before = time.time()
+    """Instantiate a Scheduler and run the 'todo' jobs on it.
+
+    Automatically verify the events emitted by the scheduler agaist the events
+    expected by the TSimpleJob instances in 'todo'.
+    """
+    initial_xevents = [j.xevents for j in todo]
+    spawned_xevents = [
+        j.xevents for j in itertools.chain(*[j.descendants() for j in todo])
+    ]
+    events = EventVerifier()
+    scheduler = scheduler_class(event_handler=events)
     for job in todo:
         scheduler.add(job)
     yield scheduler
-    verify_events(scheduler, before, events, todo)
+
+    events.verify_all(initial_xevents, spawned_xevents)
 
 
 Cancelled = object()
