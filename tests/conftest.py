@@ -102,7 +102,7 @@ class TBasicJob(basic.Job):
 
     async def __call__(self, scheduler):
         if self.deps:
-            if self.deps == {'MISSING'}:
+            if 'MISSING' in self.deps:
                 self.xevents.add('finish', fate='failed')  # expect KeyError
             else:
                 self.xevents.add(

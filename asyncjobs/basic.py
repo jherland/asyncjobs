@@ -188,16 +188,16 @@ class Scheduler:
         finally:
             # Any tasks left running at this point should be cancelled and
             # reaped/awaited _before_ we return from here
-            for job_name, task in self.tasks.items():
+            for name, task in self.tasks.items():
                 if not task.done():
-                    logger.warning(f'Cancelling {job_name}...')
+                    logger.warning(f'Cancelling {name}...')
                     task.cancel()
             try:
                 await asyncio.wait(self.tasks.values())
             finally:
                 self.event('awaited tasks')
 
-    async def run(self, keep_going=False):
+    async def run(self, *, keep_going=False):
         """Run until all jobs are finished.
 
         If keep_going is disabled (the default), the first failing job (i.e.
@@ -209,8 +209,8 @@ class Scheduler:
         failing job(s) will be cancelled.
 
         Return a dictionary mapping job names to the corresponding
-        asyncio.Future objects that encapsulate their fate (result, exception,
-        or cancelled state).
+        asyncio.Future objects that encapsulate their result (return value,
+        exception, or cancellation).
         """
         logger.debug('Running…')
         self.event('start', keep_going=keep_going, num_jobs=len(self.jobs))
