@@ -57,9 +57,9 @@ class TJob(logmuxed_work.Job, TExternalWorkJob):
         # Try really hard to provoke any issues we might have regarding
         # rescheduling/ordering of tasks and whatnot: Return a sync/async
         # callable that prints one item (char or string) from either self.out
-        # or self.err (to self.stdout/stderr respectively), and then yields/
-        # sleeps to allow other things to run before the next item is printed.
-        # Keep going until self.out and self.err are exhausted.
+        # or self.err (to self._ctx.stdout/stderr respectively), and then
+        # yields/sleeps to allow other things to run before the next item is
+        # printed. Keep going until self.out and self.err are exhausted.
 
         if isinstance(self.out, list):  # list of strings
             out = [line + '\n' for line in self.out]
@@ -75,12 +75,12 @@ class TJob(logmuxed_work.Job, TExternalWorkJob):
                 return False
             if out and err:  # Choose one at random
                 src, dst = random.choice(
-                    [(out, self.stdout), (err, self.stderr)]
+                    [(out, self._ctx.stdout), (err, self._ctx.stderr)]
                 )
             elif out:
-                src, dst = out, self.stdout
+                src, dst = out, self._ctx.stdout
             else:
-                src, dst = err, self.stderr
+                src, dst = err, self._ctx.stderr
             assert src
             print(src.pop(0), file=dst, end='')
             return True

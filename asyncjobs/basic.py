@@ -52,11 +52,11 @@ class Job:
     def __repr__(self):
         return f'{self.__class__.__name__}({self.name!r}, deps={self.deps!r})'
 
-    async def __call__(self, scheduler):
+    async def __call__(self, ctx):
         """Perform the job.
 
-        The given scheduler object can be used to interact with the
-        surrounding job running machinery.
+        The given Context object can be used to interact with the surrounding
+        job running machinery.
 
         This superclass implementation awaits the results from our dependencies
         and returns their results as a dict mapping job names to results.
@@ -68,25 +68,79 @@ class Job:
         """
         if self.deps:
             self.logger.debug(f'Awaiting dependencies {self.deps}…')
-            return await scheduler.results(*self.deps)
+            return await ctx.results(*self.deps)
         return {}
+
+
+class Context:
+    """Helper class instantiated per job and passed to the job coroutine.
+
+    This is the interface available to the job coroutine for communicating
+    with the Scheduler, and other parts of the surrounding scheduler
+    environment.
+    """
+
+    def __init__(self, name, scheduler):
+        self.name = name
+        self.logger = logging.getLogger(name)
+        self._scheduler = scheduler
+
+    def event(self, event, **kwargs):
+        """Emit a scheduling event from this job."""
+        self._scheduler.event(event, self.name, **kwargs)
+
+    async def results(self, *job_names):
+        """Wait until the given jobs are finished, and return their results.
+
+        Returns a dictionary mapping job names to their results.
+
+        Raise KeyError if any of the given jobs have not been added to the
+        scheduler. If any of the given jobs fail (either by raising an
+        exception or by being cancelled) then raise CancelledError here to
+        cancel this job as a consequence.
+        """
+        assert self._scheduler.running
+        tasks = [self._scheduler.tasks[n] for n in job_names]
+        pending = [n for n, t in zip(job_names, tasks) if not t.done()]
+        self.event('await results', jobs=list(job_names), pending=pending)
+        if pending:
+            self.logger.debug(f'waiting for {", ".join(pending)}…')
+        try:
+            results = dict(zip(job_names, await asyncio.gather(*tasks)))
+        except Exception:
+            self.logger.info(f'Cancelled due to failure(s) in {job_names}')
+            raise asyncio.CancelledError
+        self.event('awaited results')
+        self.logger.debug(f'Returning {results} from .results()')
+        return results
+
+    def add_job(self, job):
+        """Add a job to be run.
+
+        Schedule the job to start immediately. Raise ValueError if a job with
+        the same name has already been added.
+        """
+        self._scheduler.add(job)
 
 
 class Scheduler:
     """Async job scheduler. Run Job instances as concurrent tasks.
 
     Jobs are added by passing Job instances to .add(). These will be scheduled
-    for execution when .run() is called. While running, jobs may await each
-    other's results (by calling .results()). Further jobs may be added (with
-    .add()). When all jobs are completed (with or without success), .run() will
-    return dictionary with all the job results.
+    for execution when .run() is called. While running, jobs may use the
+    Context object passed to the coroutine to await each other's results or
+    spawn new jobs. When all jobs are completed (successfully or otherwise),
+    .run() will return a dictionary with all the job results.
     """
 
-    def __init__(self, *, event_handler=None):
+    def __init__(self, *, event_handler=None, context_class=Context):
         self.jobs = {}  # name -> Job
         self.tasks = {}  # name -> Task object, aka. (future) result from job()
         self.running = False
         self.event_handler = event_handler
+
+        assert issubclass(context_class, Context)
+        self.context_class = context_class
 
     def __contains__(self, job_name):
         return job_name in self.jobs
@@ -117,7 +171,8 @@ class Scheduler:
         assert name in self.jobs
         assert name not in self.tasks
 
-        task = asyncio.create_task(self.jobs[name](self), name=name)
+        ctx = self.context_class(name, self)
+        task = asyncio.create_task(self.jobs[name](ctx), name=name)
         self.tasks[name] = task
         self.event('start', name)
         task.add_done_callback(
@@ -138,33 +193,6 @@ class Scheduler:
         self.event('add', job.name)
         if self.running:
             self._start_job(job.name)
-
-    async def results(self, *job_names):
-        """Wait until the given jobs are finished, and return their results.
-
-        Returns a dictionary mapping job names to their results.
-
-        Raise KeyError if any of the given jobs have not been added to the
-        scheduler. If any of the given jobs raise an exception, then raise
-        CancelledError here to cancel the calling job.
-        """
-        assert self.running
-        caller = asyncio.current_task().get_name()
-        tasks = [self.tasks[n] for n in job_names]
-        pending = [n for n, t in zip(job_names, tasks) if not t.done()]
-        self.event(
-            'await results', caller, jobs=list(job_names), pending=pending
-        )
-        if pending:
-            logger.debug(f'{caller} is waiting for {", ".join(pending)}…')
-        try:
-            results = dict(zip(job_names, await asyncio.gather(*tasks)))
-        except Exception:
-            logger.info(f'{caller} cancelled due to failure(s) in {job_names}')
-            raise asyncio.CancelledError
-        self.event('awaited results', caller)
-        logger.debug(f'{caller} <- {results} from .results()')
-        return results
 
     async def _run_tasks(self, return_when):
         logger.info('Waiting for all jobs to complete…')

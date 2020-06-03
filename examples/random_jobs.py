@@ -30,8 +30,8 @@ class TimeWaster(Job):
         self.logger.info(f'Finished own work: {self.work}')
         return {self.name: self.work}
 
-    async def __call__(self, scheduler):
-        self.dep_results = await super().__call__(scheduler)
+    async def __call__(self, ctx):
+        self.dep_results = await super().__call__(ctx)
         return await self.call_in_thread(self.do_work)
 
 
@@ -40,7 +40,7 @@ class ParallelTimeWaster(TimeWaster):
         self.work_threshold = work_threshold
         super().__init__(**kwargs)
 
-    async def __call__(self, scheduler):
+    async def __call__(self, ctx):
         i = 0
         while self.work > self.work_threshold:
             i += 1
@@ -49,10 +49,10 @@ class ParallelTimeWaster(TimeWaster):
             )
             name = f'{self.name}_{i}/{work}'
             self.logger.info(f'Splitting off {name}')
-            scheduler.add(TimeWaster(name=name, work=work))
+            ctx.add_job(TimeWaster(name=name, work=work))
             self.deps.add(name)
             self.work -= work
-        return await super().__call__(scheduler)
+        return await super().__call__(ctx)
 
     def do_work(self):
         result = {}

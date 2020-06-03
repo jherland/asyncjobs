@@ -94,13 +94,13 @@ class TBasicJob(basic.Job):
             yield spawn
             yield from spawn.descendants()
 
-    async def do_work(self, scheduler):
+    async def do_work(self, ctx):
         result = None
         if self.call:
             result = self.call()
         return self.result if result is None else result
 
-    async def __call__(self, scheduler):
+    async def __call__(self, ctx):
         if self.deps:
             if 'MISSING' in self.deps:
                 self.xevents.add('finish', fate='failed')  # expect KeyError
@@ -108,7 +108,7 @@ class TBasicJob(basic.Job):
                 self.xevents.add(
                     'await results', jobs=list(self.deps), pending=Whatever
                 )
-        dep_results = await super().__call__(scheduler)
+        dep_results = await super().__call__(ctx)
         if self.deps:
             self.xevents.add('awaited results')
         self.logger.debug(f'Results from deps: {dep_results}')
@@ -118,20 +118,20 @@ class TBasicJob(basic.Job):
             await asyncio.sleep(self.async_sleep)
             self.logger.info('Finished async sleep')
 
-        result = await self.do_work(scheduler)
+        result = await self.do_work(ctx)
 
         for job in self.spawn:
-            scheduler.add(job)
+            ctx.add_job(job)
 
         if self.await_spawn and self.spawn:
             spawn = [job.name for job in self.spawn]
             self.xevents.add('await results', jobs=spawn, pending=spawn)
-            await scheduler.results(*[job.name for job in self.spawn])
+            await ctx.results(*[job.name for job in self.spawn])
             self.xevents.add('awaited results')
 
         for b in self.before:
-            assert b in scheduler.tasks  # The other job has been started
-            assert not scheduler.tasks[b].done()  # but is not yet finished
+            assert b in ctx._scheduler.tasks  # The other job has started
+            assert not ctx._scheduler.tasks[b].done()  # but not yet finished
 
         if isinstance(result, Exception):
             self.logger.info(f'Raising exception: {result}')
@@ -169,7 +169,7 @@ class TExternalWorkJob(TBasicJob, external_work.Job):
         else:
             self.subproc = subproc
 
-    async def _do_thread_stuff(self, scheduler):
+    async def _do_thread_stuff(self, ctx):
         self.logger.debug(f'Await call {self.thread} in thread…')
         self.xevents.add('await worker slot')
         self.xevents.add('awaited worker slot', may_cancel=True)
@@ -188,7 +188,7 @@ class TExternalWorkJob(TBasicJob, external_work.Job):
         self.logger.debug(f'Finished thread call: {ret!r}')
         return ret
 
-    async def _do_subproc_stuff(self, scheduler):
+    async def _do_subproc_stuff(self, ctx):
         self.logger.debug(f'Await run {self.subproc} in subprocess…')
         self.xevents.add('await worker slot')
         self.xevents.add('awaited worker slot', may_cancel=True)
@@ -208,12 +208,12 @@ class TExternalWorkJob(TBasicJob, external_work.Job):
         self.logger.debug(f'Finished subprocess run: {ret}')
         return ret
 
-    async def do_work(self, scheduler):
-        result = await super().do_work(scheduler)
+    async def do_work(self, ctx):
+        result = await super().do_work(ctx)
         if self.thread:
-            result = await self._do_thread_stuff(scheduler)
+            result = await self._do_thread_stuff(ctx)
         if self.subproc:
-            result = await self._do_subproc_stuff(scheduler)
+            result = await self._do_subproc_stuff(ctx)
         return result
 
 

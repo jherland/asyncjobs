@@ -21,8 +21,6 @@ class Job(external_work.Job):
 
     def __init__(self, *args, redirect_logger=True, **kwargs):
         super().__init__(*args, **kwargs)
-        self.stdout = None
-        self.stderr = None
         self.redirect_logger = redirect_logger
 
     def decorate_out(self, msg):
@@ -33,14 +31,42 @@ class Job(external_work.Job):
         """Manipulate each message sent to self.stderr."""
         return msg
 
+    async def __call__(self, ctx):
+        async with ctx.setup_redirection(
+            decorate_out=self.decorate_out,
+            decorate_err=self.decorate_err,
+            redirect_logger=self.redirect_logger,
+        ):
+            return await super().__call__(ctx)
+
+
+class Context(external_work.Context):
+    """API for jobs with stdout/stderr redirected via a LogMux-aware Scheduler.
+
+    This enables jobs to have their output multiplexed to a single (pair of)
+    output stream(s) controlled by the below Scheduler.
+
+    Redirection of the actual stdout/stderr file descriptors is automatically
+    done for subprocesses, and for self.logger (unless redirect_logger is set
+    to False). Other output (from thread workers or directly from .__call__()
+    must be redirected to self.stdout/self.stderr manually.)
+    """
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.stdout = None
+        self.stderr = None
+
     @contextlib.asynccontextmanager
-    async def _setup_redirection(self, scheduler):
-        async with scheduler.outmux.new_stream(self.decorate_out) as outf:
-            async with scheduler.errmux.new_stream(self.decorate_err) as errf:
+    async def setup_redirection(
+        self, *, decorate_out=None, decorate_err=None, redirect_logger=True
+    ):
+        async with self._scheduler.outmux.new_stream(decorate_out) as outf:
+            async with self._scheduler.errmux.new_stream(decorate_err) as errf:
                 self.stdout = outf
                 self.stderr = errf
                 log_handler = None
-                if self.redirect_logger:
+                if redirect_logger:
                     log_handler = logging.StreamHandler(self.stderr)
                     self.logger.addHandler(log_handler)
                 try:
@@ -50,10 +76,6 @@ class Job(external_work.Job):
                         self.logger.removeHandler(log_handler)
                     self.stdout = None
                     self.stderr = None
-
-    async def __call__(self, scheduler):
-        async with self._setup_redirection(scheduler):
-            return await super().__call__(scheduler)
 
     async def run_in_subprocess(self, argv, **kwargs):
         """Pass redirected out/err as stdout/stderr to the subprocess.
@@ -75,10 +97,14 @@ class Scheduler(external_work.Scheduler):
     and stderr streams redirected through these instances.
     """
 
-    def __init__(self, *, outmux=None, errmux=None, **kwargs):
+    def __init__(
+        self, *, outmux=None, errmux=None, context_class=Context, **kwargs
+    ):
         self.outmux = logmux.LogMux(sys.stdout) if outmux is None else outmux
         self.errmux = logmux.LogMux(sys.stderr) if errmux is None else errmux
-        super().__init__(**kwargs)
+
+        assert issubclass(context_class, Context)
+        super().__init__(context_class=context_class, **kwargs)
 
     async def _run_tasks(self, *args, **kwargs):
         logger.debug('Starting LogMux instances…')

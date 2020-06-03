@@ -46,11 +46,12 @@ class Fetcher(Job):
         print(f'{indent}* [{title}] links to {len(hrefs)} articles')
         return title, hrefs
 
-    async def __call__(self, scheduler):
-        title, hrefs = await super().__call__(scheduler)
+    async def __call__(self, ctx):
+        title, hrefs = await super().__call__(ctx)
+        sched = ctx._scheduler
         for href in hrefs:
-            if len(scheduler.jobs) < num_articles and href not in scheduler:
-                scheduler.add(self.__class__(href, self.level + 1))
+            if len(sched.jobs) < num_articles and href not in sched:
+                ctx.add_job(self.__class__(href, self.level + 1))
 
 
 events = []
