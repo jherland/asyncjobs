@@ -87,7 +87,7 @@ class Context:
 
     def event(self, event, **kwargs):
         """Emit a scheduling event from this job."""
-        self._scheduler.event(event, self.name, **kwargs)
+        self._scheduler.event(event, job=self.name, **kwargs)
 
     async def results(self, *job_names):
         """Wait until the given jobs are finished, and return their results.
@@ -145,12 +145,10 @@ class Scheduler:
     def __contains__(self, job_name):
         return job_name in self.jobs
 
-    def event(self, event, job_name=None, **kwargs):
+    def event(self, event, **kwargs):
         if self.event_handler is None:
             return
         d = {'timestamp': time.time(), 'event': event}
-        if job_name is not None:
-            d['job'] = job_name
         d.update(kwargs)
         logger.debug(f'Posting event: {d}')
         self.event_handler(d)
@@ -174,9 +172,9 @@ class Scheduler:
         ctx = self.context_class(name, self)
         task = asyncio.create_task(self.jobs[name](ctx), name=name)
         self.tasks[name] = task
-        self.event('start', name)
+        self.event('start', job=name)
         task.add_done_callback(
-            lambda task: self.event('finish', name, fate=self._fate(task))
+            lambda task: self.event('finish', job=name, fate=self._fate(task))
         )
 
     def add(self, job):
@@ -190,7 +188,7 @@ class Scheduler:
             exist = self.jobs[job.name]
             raise ValueError(f'Cannot add {job} with same name as {exist}')
         self.jobs[job.name] = job
-        self.event('add', job.name)
+        self.event('add', job=job.name)
         if self.running:
             self._start_job(job.name)
 
