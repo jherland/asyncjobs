@@ -175,7 +175,7 @@ class TExternalWorkJob(TBasicJob, external_work.Job):
         self.xevents.add('awaited worker slot', may_cancel=True)
         self.xevents.add('await worker thread', may_cancel=True, func=Whatever)
         try:
-            ret = await self.call_in_thread(self.thread)
+            ret = await ctx.call_in_thread(self.thread)
             self.xevents.add('awaited worker thread', fate='success')
         except asyncio.CancelledError:
             self.xevents.add(
@@ -196,7 +196,7 @@ class TExternalWorkJob(TBasicJob, external_work.Job):
             'await worker proc', may_cancel=True, argv=self.subproc
         )
         try:
-            ret = await self.run_in_subprocess(self.subproc)
+            ret = await ctx.run_in_subprocess(self.subproc)
             self.xevents.add('awaited worker proc', returncode=0)
         except asyncio.CancelledError:
             self.xevents.add(

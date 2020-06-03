@@ -25,20 +25,10 @@ class Job(basic.Job):
         self._ctx = ctx
         ret = await super().__call__(ctx)
         if self.thread_func is not NotImplemented:
-            ret = await self.call_in_thread(self.thread_func)
+            ret = await ctx.call_in_thread(self.thread_func)
         elif self.subprocess_argv is not NotImplemented:
-            ret = await self.run_in_subprocess(self.subprocess_argv)
+            ret = await ctx.run_in_subprocess(self.subprocess_argv)
         return ret
-
-    async def call_in_thread(self, func, *args):
-        """Call func(*args) in a worker thread and await its result."""
-        assert self._ctx is not None
-        return await self._ctx.call_in_thread(func, *args)
-
-    async def run_in_subprocess(self, argv, **kwargs):
-        """Run a command line in a subprocess and await its exit code."""
-        assert self._ctx is not None
-        return await self._ctx.run_in_subprocess(argv, **kwargs)
 
 
 class Context(basic.Context):
