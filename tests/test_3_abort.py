@@ -7,7 +7,7 @@ from conftest import (
     abort_in,
     assert_elapsed_time_within,
     Cancelled,
-    setup_scheduler,
+    scheduler_session,
     TExternalWorkJob,
     verify_tasks,
 )
@@ -24,7 +24,7 @@ def run(scheduler_with_workers):
     )
 
     async def _run(todo, abort_after=None, **run_args):
-        with setup_scheduler(Scheduler, todo) as scheduler:
+        with scheduler_session(Scheduler, todo) as scheduler:
             with abort_in(abort_after):
                 return await scheduler.run(**run_args)
 

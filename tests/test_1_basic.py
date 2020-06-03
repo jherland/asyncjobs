@@ -4,7 +4,7 @@ from asyncjobs.basic import Scheduler
 
 from conftest import (
     Cancelled,
-    setup_scheduler,
+    scheduler_session,
     TSimpleJob,
     verify_tasks,
 )
@@ -13,7 +13,7 @@ pytestmark = pytest.mark.asyncio
 
 
 async def run(todo, **run_args):
-    with setup_scheduler(Scheduler, todo) as scheduler:
+    with scheduler_session(Scheduler, todo) as scheduler:
         return await scheduler.run(**run_args)
 
 

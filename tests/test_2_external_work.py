@@ -6,7 +6,7 @@ from asyncjobs import external_work
 
 from conftest import (
     Cancelled,
-    setup_scheduler,
+    scheduler_session,
     TExternalWorkJob,
     verify_tasks,
 )
@@ -21,7 +21,7 @@ def run(scheduler_with_workers):
     Scheduler = scheduler_with_workers(external_work.Scheduler)
 
     async def _run(todo, **run_args):
-        with setup_scheduler(Scheduler, todo) as scheduler:
+        with scheduler_session(Scheduler, todo) as scheduler:
             return await scheduler.run(**run_args)
 
     return _run

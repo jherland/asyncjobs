@@ -335,7 +335,7 @@ def scheduler_with_workers(num_workers):
 
 
 @contextmanager
-def setup_scheduler(scheduler_class, todo):
+def scheduler_session(scheduler_class, todo):
     events = []
     scheduler = scheduler_class(event_handler=events.append)
     before = time.time()
