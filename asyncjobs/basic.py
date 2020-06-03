@@ -113,11 +113,15 @@ class Scheduler:
         else:
             return 'success'
 
-    def _start_job(self, job):
-        self.tasks[job.name] = asyncio.create_task(job(self), name=job.name)
-        self.event('start', job.name)
-        self.tasks[job.name].add_done_callback(
-            lambda task: self.event('finish', job.name, fate=self._fate(task))
+    def _start_job(self, name):
+        assert name in self.jobs
+        assert name not in self.tasks
+
+        task = asyncio.create_task(self.jobs[name](self), name=name)
+        self.tasks[name] = task
+        self.event('start', name)
+        task.add_done_callback(
+            lambda task: self.event('finish', name, fate=self._fate(task))
         )
 
     def add(self, job):
@@ -133,7 +137,7 @@ class Scheduler:
         self.jobs[job.name] = job
         self.event('add', job.name)
         if self.running:
-            self._start_job(job)
+            self._start_job(job.name)
 
     async def results(self, *job_names):
         """Wait until the given jobs are finished, and return their results.
@@ -219,10 +223,9 @@ class Scheduler:
         else:
             return_when = concurrent.futures.FIRST_EXCEPTION
 
-        to_start = list(self.jobs.values())
-        if to_start:
-            for job in to_start:
-                self._start_job(job)
+        if self.jobs:
+            for name in self.jobs.keys():
+                self._start_job(name)
 
             self.running = True
             await self._run_tasks(return_when)
