@@ -55,7 +55,7 @@ class Context(basic.Context):
         """
         self.logger.debug('-> acquiring worker semaphore…')
         self.event('await worker slot')
-        async with self._scheduler.worker_sem:
+        async with self._scheduler.worker_semaphore:
             self.event('awaited worker slot')
             self.logger.debug('-- acquired worker semaphore')
             try:
@@ -128,7 +128,7 @@ class Scheduler(basic.Scheduler):
     def __init__(self, *, workers=1, context_class=Context, **kwargs):
         assert workers > 0
         self.workers = workers
-        self.worker_sem = None
+        self.worker_semaphore = None
         self.worker_threads = None
 
         assert issubclass(context_class, Context)
@@ -144,7 +144,7 @@ class Scheduler(basic.Scheduler):
         )
 
     async def _run_tasks(self, *args, **kwargs):
-        self.worker_sem = asyncio.BoundedSemaphore(self.workers)
+        self.worker_semaphore = asyncio.BoundedSemaphore(self.workers)
 
         try:
             await super()._run_tasks(*args, **kwargs)
