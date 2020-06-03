@@ -81,6 +81,7 @@ class Context:
     def __init__(self, name, scheduler):
         self.name = name
         self.logger = logging.getLogger(name)
+        self.deps = None  # set by the coroutine wrapper in Scheduler.add_job()
         self._scheduler = scheduler
 
     def event(self, event, **kwargs):
@@ -175,20 +176,38 @@ class Scheduler:
             lambda task: self.event('finish', job=name, fate=self._fate(task))
         )
 
-    def add(self, job):
-        """Add a job to be run.
+    def add_job(self, name, coro, deps=None):
+        """Add a job (aka. named coroutine) to be run.
+
+        If 'deps' is given, it must be a set of names of other jobs that will
+        be awaited before coro is started. The results of those jobs is made
+        available in the ctx.deps dict.
 
         If we're already running (i.e. inside .run()) schedule the job
         immediately, otherwise the job will be scheduled when .run() is called.
         Raise ValueError if a job with the same name has already been added.
         """
-        if job.name in self.jobs:
-            exist = self.jobs[job.name]
-            raise ValueError(f'Cannot add {job} with same name as {exist}')
-        self.jobs[job.name] = job
-        self.event('add', job=job.name)
+        if name in self.jobs:
+            raise ValueError(f'Cannot add job named {name}. Already added!')
+
+        logger.debug(f'Adding job named {name} with deps={deps!r}')
+        if deps is not None:
+
+            async def deps_before_coro(ctx, wrapped_coro=coro):
+                assert ctx.deps is None
+                ctx.logger.debug(f'Awaiting dependencies {deps}…')
+                ctx.deps = await ctx.results(*deps)
+                return await wrapped_coro(ctx)
+
+            coro = deps_before_coro
+
+        self.jobs[name] = coro
+        self.event('add', job=name)
         if self.running:
-            self._start_job(job.name)
+            self._start_job(name)
+
+    def add(self, job):
+        return self.add_job(job.name, job)
 
     async def _run_tasks(self, return_when):
         logger.info('Waiting for all jobs to complete…')
