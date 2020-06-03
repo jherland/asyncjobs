@@ -11,13 +11,15 @@ from conftest import (
 
 pytestmark = pytest.mark.asyncio
 
+TJob = TBasicJob
+
 
 async def run(todo, **run_args):
     with scheduler_session(Scheduler, todo) as scheduler:
         return await scheduler.run(**run_args)
 
 
-TJob = TBasicJob
+# simple scenarios, no dependencies
 
 
 async def test_zero_jobs_does_nothing():
@@ -54,6 +56,9 @@ async def test_two_independent_ok_jobs():
     todo = [TJob('foo'), TJob('bar')]
     done = await run(todo)
     assert verify_tasks(done, {'foo': 'foo done', 'bar': 'bar done'})
+
+
+# jobs with dependencies
 
 
 async def test_one_ok_before_another_ok_job():
@@ -117,6 +122,9 @@ async def test_one_failed_job_between_two_ok_jobs_cancels_last_job():
     assert verify_tasks(
         done, {'foo': 'foo done', 'bar': ValueError('UGH'), 'baz': Cancelled}
     )
+
+
+# keep_going=False cancels jobs even when no dependency
 
 
 async def test_one_ok_and_one_failed_job_without_keep_going_cancels_ok_job():

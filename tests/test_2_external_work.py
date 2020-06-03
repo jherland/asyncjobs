@@ -1,4 +1,3 @@
-import logging
 import pytest
 from subprocess import CalledProcessError
 
@@ -13,7 +12,7 @@ from conftest import (
 
 pytestmark = pytest.mark.asyncio
 
-logger = logging.getLogger(__name__)
+TJob = TExternalWorkJob
 
 
 @pytest.fixture
@@ -25,9 +24,6 @@ def run(scheduler_with_workers):
             return await scheduler.run(**run_args)
 
     return _run
-
-
-TJob = TExternalWorkJob
 
 
 async def test_one_ok_job_in_thread(run):

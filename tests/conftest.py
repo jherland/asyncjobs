@@ -254,6 +254,7 @@ def scheduler_session(scheduler_class, todo):
     events.verify_all(initial_xevents, spawned_xevents)
 
 
+# Used to signal the expectation of a cancelled task
 Cancelled = object()
 
 

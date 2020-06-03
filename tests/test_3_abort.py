@@ -1,4 +1,3 @@
-import logging
 import pytest
 
 from asyncjobs import external_work, signal_handling
@@ -14,7 +13,7 @@ from conftest import (
 
 pytestmark = pytest.mark.asyncio
 
-logger = logging.getLogger(__name__)
+TJob = TExternalWorkJob
 
 
 @pytest.fixture
@@ -30,8 +29,6 @@ def run(scheduler_with_workers):
 
     return _run
 
-
-TJob = TExternalWorkJob
 
 # aborting jobs shall properly clean up all jobs + scheduler
 

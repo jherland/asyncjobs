@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from pathlib import Path
 import pytest
 import random
@@ -15,8 +14,6 @@ from conftest import (
 )
 
 pytestmark = pytest.mark.asyncio
-
-logger = logging.getLogger(__name__)
 
 sh_helper = Path(__file__).parent / 'test_5_logmuxed_work_helper.sh'
 
@@ -122,6 +119,9 @@ def run(scheduler_with_workers):
     return _run
 
 
+# no output
+
+
 async def test_no_output_from_no_jobs(run, verify_output):
     await run([])
     assert verify_output([], [])
@@ -130,6 +130,9 @@ async def test_no_output_from_no_jobs(run, verify_output):
 async def test_no_output_from_two_jobs(run, verify_output):
     await run([TJob('foo'), TJob('bar')])
     assert verify_output([[], []], [[], []])
+
+
+# undecorated output
 
 
 async def test_default_output_is_undecorated(run, verify_output):
@@ -147,6 +150,9 @@ async def test_default_output_is_undecorated(run, verify_output):
         [[out.format(name=name)] for name in jobs],
         [[err.format(name=name)] for name in jobs],
     )
+
+
+# decorated output
 
 
 async def test_decorated_output_from_two_jobs(run, verify_output):
