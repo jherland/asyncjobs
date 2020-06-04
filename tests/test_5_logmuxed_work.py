@@ -40,6 +40,7 @@ class TJob(logmuxed_work.Job, TExternalWorkJob):
             self.thread = self._print_out_and_err(True)
         elif 'subproc' not in kwargs:
             self.do_work = self._print_out_and_err(False)
+        self._ctx = None
 
     def decorate_out(self, msg):
         if self.decorate:
@@ -103,6 +104,10 @@ class TJob(logmuxed_work.Job, TExternalWorkJob):
                     await asyncio.sleep(0)
 
             return print_async
+
+    async def __call__(self, ctx):
+        self._ctx = ctx
+        return await super().__call__(ctx)
 
 
 @pytest.fixture

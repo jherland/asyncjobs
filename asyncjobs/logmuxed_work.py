@@ -2,12 +2,12 @@ import contextlib
 import logging
 import sys
 
-from . import external_work, logmux
+from . import basic, external_work, logmux
 
 logger = logging.getLogger(__name__)
 
 
-class Job(external_work.Job):
+class Job(basic.Job):
     """Job with stdout/stderr redirected via a LogMux-enabled Scheduler.
 
     This enables jobs to have their output multiplexed to a single (pair of)

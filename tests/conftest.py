@@ -9,7 +9,7 @@ import signal
 from subprocess import CalledProcessError
 import time
 
-from asyncjobs import basic, external_work
+from asyncjobs import basic
 
 from verify_events import EventVerifier, ExpectedJobEvents, Whatever
 
@@ -143,7 +143,7 @@ class TBasicJob(basic.Job):
             return result
 
 
-class TExternalWorkJob(TBasicJob, external_work.Job):
+class TExternalWorkJob(TBasicJob):
     """Test jobs with thread/subprocess capabilities."""
 
     def __init__(

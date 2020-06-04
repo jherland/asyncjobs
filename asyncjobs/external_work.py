@@ -3,32 +3,10 @@ import concurrent.futures
 import contextlib
 import logging
 import subprocess
-from typing import Any, Callable, List
 
 from . import basic
 
 logger = logging.getLogger(__name__)
-
-
-class Job(basic.Job):
-    # Override _one_ of these in a subclass or instance to have it
-    # automatically invoked by the default __call__() implementation.
-    # For anything more advanced, please override __call__() instead.
-    thread_func: Callable[[], Any] = NotImplemented
-    subprocess_argv: List[str] = NotImplemented
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._ctx = None
-
-    async def __call__(self, ctx):
-        self._ctx = ctx
-        ret = await super().__call__(ctx)
-        if self.thread_func is not NotImplemented:
-            ret = await ctx.call_in_thread(self.thread_func)
-        elif self.subprocess_argv is not NotImplemented:
-            ret = await ctx.run_in_subprocess(self.subprocess_argv)
-        return ret
 
 
 class Context(basic.Context):

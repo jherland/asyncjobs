@@ -9,9 +9,6 @@ from . import basic
 logger = logging.getLogger(__name__)
 
 
-Job = basic.Job
-
-
 class Scheduler(basic.Scheduler):
     """Teach Scheduler to cancel/abort properly on incoming signals.
 
