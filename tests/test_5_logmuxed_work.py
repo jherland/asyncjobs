@@ -83,6 +83,13 @@ def print_out_err(out, err, *, sync):
     return print_out_err_sync if sync else print_out_err_async
 
 
+def decorators(job_name):
+    return (
+        lambda msg: f'{job_name}/out: {msg.rstrip()}\n',
+        lambda msg: f'{job_name}/ERR: {msg.rstrip()}\n',
+    )
+
+
 class TJob(logmuxed_work.Job, TExternalWorkJob):
     def __init__(
         self,
@@ -95,23 +102,12 @@ class TJob(logmuxed_work.Job, TExternalWorkJob):
         **kwargs,
     ):
         super().__init__(*args, redirect_logger=redirect_logger, **kwargs)
-        self.decorate = decorate
         if in_thread:
             self.thread = print_out_err(out, err, sync=True)
         elif 'subproc' not in kwargs:
             self.do_work = print_out_err(out, err, sync=False)
-
-    def decorate_out(self, msg):
-        if self.decorate:
-            return f'{self.name}/out: {msg.rstrip()}\n'
-        else:
-            return msg
-
-    def decorate_err(self, msg):
-        if self.decorate:
-            return f'{self.name}/ERR: {msg.rstrip()}\n'
-        else:
-            return msg
+        if decorate:
+            self.decorate_out, self.decorate_err = decorators(self.name)
 
 
 @pytest.fixture
