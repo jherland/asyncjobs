@@ -1,4 +1,5 @@
 import asyncio
+import functools
 from pathlib import Path
 import pytest
 import random
@@ -18,28 +19,87 @@ pytestmark = pytest.mark.asyncio
 sh_helper = Path(__file__).parent / 'test_5_logmuxed_work_helper.sh'
 
 
+def shuffled_prints(out_f, err_f, out_str, err_str):
+    """Print out_str -> out_f and err_str -> err_f in shuffled order.
+
+    Return a stream of callables that together prints out_str -> out_f and
+    err_str -> err_f such that the each char is printed in order, but the
+    out_f and err_f prints are interleaved in a random order. E.g. this call:
+
+        shuffled_prints(sys.stdout, sys.stderr, 'foo', 'bar')
+
+    might result in the following (un-called) prints being yielded:
+
+        print('b', file=sys.stderr, end='')
+        print('f', file=sys.stdout, end='')
+        print('o', file=sys.stdout, end='')
+        print('a', file=sys.stderr, end='')
+        print('o', file=sys.stdout, end='')
+        print('r', file=sys.stderr, end='')
+
+    This helper is an attempt to provoke any issues we might have regarding
+    rescheduling/ordering of tasks and internal handling of file descriptors.
+    """
+
+    def prints(f, s):
+        """Yield callables that print each char of s to f, in order."""
+        for c in s:
+            yield functools.partial(print, c, file=f, end='')
+
+    def random_interleave(*iterators):
+        """Yield from each iterator in random order until all are exhausted."""
+        iterators = list(iterators)
+        while iterators:
+            i = random.randrange(len(iterators))
+            try:
+                yield next(iterators[i])
+            except StopIteration:  # iterators[i] is exhausted
+                del iterators[i]
+
+    out_prints = prints(out_f, out_str)
+    err_prints = prints(err_f, err_str)
+    yield from random_interleave(out_prints, err_prints)
+
+
+def print_out_err(out, err, *, sync):
+    # out/err are strings or lists of strings. If strings, the chars in the
+    # string will be printed one-by-one, if lists of strings, each string
+    # will be printed with a trailing newline.
+    if isinstance(out, list):  # list of strings
+        out = [line + '\n' for line in out]
+    if isinstance(err, list):  # list of strings
+        err = [line + '\n' for line in err]
+
+    async def print_out_err_async(ctx):
+        for print_one in shuffled_prints(ctx.stdout, ctx.stderr, out, err):
+            print_one()
+            await asyncio.sleep(0)
+
+    def print_out_err_sync(ctx):
+        for print_one in shuffled_prints(ctx.stdout, ctx.stderr, out, err):
+            print_one()
+            time.sleep(0.001)
+
+    return print_out_err_sync if sync else print_out_err_async
+
+
 class TJob(logmuxed_work.Job, TExternalWorkJob):
     def __init__(
         self,
         *args,
-        out=None,
-        err=None,
+        out='',
+        err='',
         in_thread=False,
         decorate=False,
         redirect_logger=False,
         **kwargs,
     ):
         super().__init__(*args, redirect_logger=redirect_logger, **kwargs)
-        # out/err are strings or lists of strings. If strings, the chars in the
-        # string will be printed one-by-one, if lists of strings, each string
-        # will be printed. See ._print_out_and_err() below for details.
-        self.out = out
-        self.err = err
         self.decorate = decorate
         if in_thread:
-            self.thread = self._print_out_and_err(True)
+            self.thread = print_out_err(out, err, sync=True)
         elif 'subproc' not in kwargs:
-            self.do_work = self._print_out_and_err(False)
+            self.do_work = print_out_err(out, err, sync=False)
 
     def decorate_out(self, msg):
         if self.decorate:
@@ -52,60 +112,6 @@ class TJob(logmuxed_work.Job, TExternalWorkJob):
             return f'{self.name}/ERR: {msg.rstrip()}\n'
         else:
             return msg
-
-    def _print_out_and_err(self, sync):
-        # Try really hard to provoke any issues we might have regarding
-        # rescheduling/ordering of tasks and whatnot: Return a sync/async
-        # callable that prints one item (char or string) from either self.out
-        # or self.err (to ctx.stdout/stderr respectively), and then
-        # yields/sleeps to allow other things to run before the next item is
-        # printed. Keep going until self.out and self.err are exhausted.
-
-        if isinstance(self.out, list):  # list of strings
-            out = [line + '\n' for line in self.out]
-        else:  # list of chars
-            out = [] if self.out is None else list(self.out)
-        if isinstance(self.err, list):  # list of strings
-            err = [line + '\n' for line in self.err]
-        else:  # list of chars
-            err = [] if self.err is None else list(self.err)
-
-        def print_one_item(ctx):
-            if not (out or err):  # Nothing left to do
-                return False
-            if out and err:  # Choose one at random
-                src, dst = random.choice(
-                    [(out, ctx.stdout), (err, ctx.stderr)]
-                )
-            elif out:
-                src, dst = out, ctx.stdout
-            else:
-                src, dst = err, ctx.stderr
-            assert src
-            print(src.pop(0), file=dst, end='')
-            return True
-
-        if sync:
-
-            def print_sync(ctx):
-                while True:
-                    if not print_one_item(ctx):
-                        break
-                    time.sleep(0.001)
-
-            return print_sync
-        else:
-
-            async def print_async(ctx):
-                while True:
-                    if not print_one_item(ctx):
-                        break
-                    await asyncio.sleep(0)
-
-            return print_async
-
-    async def __call__(self, ctx):
-        return await super().__call__(ctx)
 
 
 @pytest.fixture
