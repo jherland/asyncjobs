@@ -159,7 +159,7 @@ class TExternalWorkJob(TBasicJob):
         if thread_sleep:
             if thread is not None:
                 raise ValueError('Cannot both sleep and work in thread')
-            self.thread = partial(time.sleep, thread_sleep)
+            self.thread = lambda ctx: time.sleep(thread_sleep)
         else:
             self.thread = thread
         if subproc_sleep:
@@ -175,7 +175,7 @@ class TExternalWorkJob(TBasicJob):
         self.xevents.add('awaited worker slot', may_cancel=True)
         self.xevents.add('await worker thread', may_cancel=True, func=Whatever)
         try:
-            ret = await ctx.call_in_thread(self.thread)
+            ret = await ctx.call_in_thread(self.thread, ctx)
             self.xevents.add('awaited worker thread', fate='success')
         except asyncio.CancelledError:
             self.xevents.add(

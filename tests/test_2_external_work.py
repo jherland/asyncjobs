@@ -27,7 +27,7 @@ def run(scheduler_with_workers):
 
 
 async def test_one_ok_job_in_thread(run):
-    todo = [TJob('foo', thread=lambda: 'foo worked')]
+    todo = [TJob('foo', thread=lambda ctx: 'foo worked')]
     done = await run(todo)
     assert verify_tasks(done, {'foo': 'foo worked'})
 
@@ -41,13 +41,13 @@ async def test_one_ok_job_in_subproc(run, tmp_path):
 
 
 async def test_one_failed_between_two_ok_jobs_in_threads_cancels_last(run):
-    def raiseUGH():
+    def raiseUGH(ctx):
         raise ValueError('UGH')
 
     todo = [
-        TJob('foo', before={'bar'}, thread=lambda: 'foo worked'),
+        TJob('foo', before={'bar'}, thread=lambda ctx: 'foo worked'),
         TJob('bar', {'foo'}, before={'baz'}, thread=raiseUGH),
-        TJob('baz', {'bar'}, thread=lambda: 'baz worked'),
+        TJob('baz', {'bar'}, thread=lambda ctx: 'baz worked'),
     ]
     done = await run(todo)
     assert verify_tasks(

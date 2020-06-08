@@ -40,7 +40,6 @@ class TJob(logmuxed_work.Job, TExternalWorkJob):
             self.thread = self._print_out_and_err(True)
         elif 'subproc' not in kwargs:
             self.do_work = self._print_out_and_err(False)
-        self._ctx = None
 
     def decorate_out(self, msg):
         if self.decorate:
@@ -58,7 +57,7 @@ class TJob(logmuxed_work.Job, TExternalWorkJob):
         # Try really hard to provoke any issues we might have regarding
         # rescheduling/ordering of tasks and whatnot: Return a sync/async
         # callable that prints one item (char or string) from either self.out
-        # or self.err (to self._ctx.stdout/stderr respectively), and then
+        # or self.err (to ctx.stdout/stderr respectively), and then
         # yields/sleeps to allow other things to run before the next item is
         # printed. Keep going until self.out and self.err are exhausted.
 
@@ -71,42 +70,41 @@ class TJob(logmuxed_work.Job, TExternalWorkJob):
         else:  # list of chars
             err = [] if self.err is None else list(self.err)
 
-        def print_one_item():
+        def print_one_item(ctx):
             if not (out or err):  # Nothing left to do
                 return False
             if out and err:  # Choose one at random
                 src, dst = random.choice(
-                    [(out, self._ctx.stdout), (err, self._ctx.stderr)]
+                    [(out, ctx.stdout), (err, ctx.stderr)]
                 )
             elif out:
-                src, dst = out, self._ctx.stdout
+                src, dst = out, ctx.stdout
             else:
-                src, dst = err, self._ctx.stderr
+                src, dst = err, ctx.stderr
             assert src
             print(src.pop(0), file=dst, end='')
             return True
 
         if sync:
 
-            def print_sync():
+            def print_sync(ctx):
                 while True:
-                    if not print_one_item():
+                    if not print_one_item(ctx):
                         break
                     time.sleep(0.001)
 
             return print_sync
         else:
 
-            async def print_async(*_):
+            async def print_async(ctx):
                 while True:
-                    if not print_one_item():
+                    if not print_one_item(ctx):
                         break
                     await asyncio.sleep(0)
 
             return print_async
 
     async def __call__(self, ctx):
-        self._ctx = ctx
         return await super().__call__(ctx)
 
 
