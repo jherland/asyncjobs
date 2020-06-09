@@ -1,10 +1,49 @@
 import contextlib
+import functools
 import logging
 import sys
 
 from . import external_work, logmux
 
 logger = logging.getLogger(__name__)
+
+
+def redirected_job(decorate_out=None, decorate_err=None, redirect_logger=True):
+    """Setup stdout/stderr redirection for the given coroutine.
+
+    This is the same as wrapping the entire corouting in:
+
+        async with ctx.setup_redirection(...):
+            ...
+
+    Use as a decorator:
+
+        @redirected_job()
+        async def my_job(ctx):
+            ctx.logger.info('hello')
+            await asyncio.sleep(1)
+            ctx.logger.info(world')
+
+        @redirected_job(decorate_out=lambda s: f'DECORATED: {s}')
+        async def my_other_job(ctx):
+            print('hello', file=ctx.stdout)
+            await asyncio.sleep(1)
+            print(again', file=ctx.stdout)
+    """
+
+    def wrap(coro):
+        @functools.wraps(coro)
+        async def wrapped_coro(ctx):
+            async with ctx.setup_redirection(
+                decorate_out=decorate_out,
+                decorate_err=decorate_err,
+                redirect_logger=redirect_logger,
+            ):
+                return await coro(ctx)
+
+        return wrapped_coro
+
+    return wrap
 
 
 class Context(external_work.Context):

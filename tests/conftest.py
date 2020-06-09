@@ -239,23 +239,26 @@ def scheduler_with_workers(num_workers):
 
 
 @contextmanager
-def scheduler_session(scheduler_class, todo):
+def scheduler_session(scheduler_class, todo, check_events=True):
     """Instantiate a Scheduler and run the 'todo' jobs on it.
 
     Automatically verify the events emitted by the scheduler agaist the events
     expected by the TBasicJob instances in 'todo'.
     """
-    initial_xevents = [j.xevents for j in todo]
-    spawned_xevents = [
-        j.xevents for j in itertools.chain(*[j.descendants() for j in todo])
-    ]
+    if check_events:
+        initial_xevents = [j.xevents for j in todo]
+        spawned_xevents = [
+            j.xevents
+            for j in itertools.chain(*[j.descendants() for j in todo])
+        ]
     events = EventVerifier()
     scheduler = scheduler_class(event_handler=events)
     for job in todo:
         scheduler.add(job)
     yield scheduler
 
-    events.verify_all(initial_xevents, spawned_xevents)
+    if check_events:
+        events.verify_all(initial_xevents, spawned_xevents)
 
 
 # Used to signal the expectation of a cancelled task

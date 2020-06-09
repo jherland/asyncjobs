@@ -126,8 +126,8 @@ def run(scheduler_with_workers):
         signal_handling.Scheduler, logmuxed_work.Scheduler
     )
 
-    async def _run(todo, abort_after=None, **run_args):
-        with scheduler_session(Scheduler, todo) as scheduler:
+    async def _run(todo, abort_after=None, check_events=True, **run_args):
+        with scheduler_session(Scheduler, todo, check_events) as scheduler:
             with abort_in(abort_after):
                 return await scheduler.run(**run_args)
 
@@ -311,10 +311,66 @@ async def test_decorated_output_from_aborted_processes(
 
     # We have 3 jobs, but can only run as many concurrently as there are
     # workers available. The rest will be cancelled before they start their
-    # subprocee
+    # subprocess
     outprefix = '{name}/out: '
     expect_out = [[(outprefix + out).format(name=name)] for name in jobs]
     assert verify_output(expect_out[:num_workers], [])
+
+
+# redirected_job() decorator
+
+
+async def test_redirected_job_no_decoration(run, verify_output):
+    @logmuxed_work.redirected_job()
+    async def job(ctx):
+        print('Printing to stdout', file=ctx.stdout)
+        print('Printing to stderr', file=ctx.stderr)
+        ctx.logger.info('Logging to stderr')
+
+    job.name = 'foo'
+    await run([job], check_events=False)
+    assert verify_output(
+        [['Printing to stdout']],
+        [['Printing to stderr', 'Logging to stderr']],
+    )
+
+
+async def test_redirected_job_decorate_without_logger(run, verify_output):
+
+    dec_out, dec_err = decorators('foo')
+
+    @logmuxed_work.redirected_job(dec_out, dec_err, False)
+    async def job(ctx):
+        print('Printing to stdout', file=ctx.stdout)
+        print('Printing to stderr', file=ctx.stderr)
+        ctx.logger.info('Logging to stderr')
+
+    job.name = 'foo'
+    await run([job], check_events=False)
+    assert verify_output(
+        [['foo/out: Printing to stdout']], [['foo/ERR: Printing to stderr']],
+    )
+
+
+async def test_redirected_job_decorate_err_with_logger(run, verify_output):
+
+    _, dec_err = decorators('foo')
+
+    @logmuxed_work.redirected_job(decorate_err=dec_err)
+    async def job(ctx):
+        print('Printing to stdout', file=ctx.stdout)
+        print('Printing to stderr', file=ctx.stderr)
+        ctx.logger.info('Logging to stderr')
+
+    job.name = 'foo'
+    await run([job], check_events=False)
+    assert verify_output(
+        [['Printing to stdout']],
+        [['foo/ERR: Printing to stderr', 'foo/ERR: Logging to stderr']],
+    )
+
+
+# stress-testing the logmux framework
 
 
 async def test_decorated_output_from_100_jobs(run, verify_output):
