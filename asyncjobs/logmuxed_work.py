@@ -2,42 +2,9 @@ import contextlib
 import logging
 import sys
 
-from . import basic, external_work, logmux
+from . import external_work, logmux
 
 logger = logging.getLogger(__name__)
-
-
-class Job(basic.Job):
-    """Job with stdout/stderr redirected via a LogMux-enabled Scheduler.
-
-    This enables jobs to have their output multiplexed to a single (pair of)
-    output stream(s) controlled by the Scheduler.
-
-    Redirection of the actual stdout/stderr file descriptors is automatically
-    done for subprocesses, and for self.logger (unless redirect_logger is set
-    to False). Other output (from thread workers or directly from .__call__()
-    must be redirected to self.stdout/self.stderr manually.)
-    """
-
-    def __init__(self, *args, redirect_logger=True, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.redirect_logger = redirect_logger
-
-    def decorate_out(self, msg):
-        """Manipulate each message sent to self.stdout."""
-        return msg
-
-    def decorate_err(self, msg):
-        """Manipulate each message sent to self.stderr."""
-        return msg
-
-    async def __call__(self, ctx):
-        async with ctx.setup_redirection(
-            decorate_out=self.decorate_out,
-            decorate_err=self.decorate_err,
-            redirect_logger=self.redirect_logger,
-        ):
-            return await super().__call__(ctx)
 
 
 class Context(external_work.Context):

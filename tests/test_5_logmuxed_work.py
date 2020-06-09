@@ -90,7 +90,7 @@ def decorators(job_name):
     )
 
 
-class TJob(logmuxed_work.Job, TExternalWorkJob):
+class TJob(TExternalWorkJob):
     def __init__(
         self,
         *args,
@@ -101,13 +101,23 @@ class TJob(logmuxed_work.Job, TExternalWorkJob):
         redirect_logger=False,
         **kwargs,
     ):
-        super().__init__(*args, redirect_logger=redirect_logger, **kwargs)
+        super().__init__(*args, **kwargs)
         if in_thread:
             self.thread = print_out_err(out, err, sync=True)
         elif 'subproc' not in kwargs:
             self.do_work = print_out_err(out, err, sync=False)
+        self.redirect_logger = redirect_logger
+        self.decorate_out, self.decorate_err = None, None
         if decorate:
             self.decorate_out, self.decorate_err = decorators(self.name)
+
+    async def __call__(self, ctx):
+        async with ctx.setup_redirection(
+            decorate_out=self.decorate_out,
+            decorate_err=self.decorate_err,
+            redirect_logger=self.redirect_logger,
+        ):
+            return await super().__call__(ctx)
 
 
 @pytest.fixture
