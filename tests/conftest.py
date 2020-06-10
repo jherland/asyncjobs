@@ -9,8 +9,6 @@ import signal
 from subprocess import CalledProcessError
 import time
 
-from asyncjobs import basic
-
 from verify_events import EventVerifier, ExpectedJobEvents, Whatever
 
 logger = logging.getLogger(__name__)
@@ -62,7 +60,7 @@ def assert_elapsed_time_within(time_limit):
         assert after < before + time_limit
 
 
-class TBasicJob(basic.Job):
+class TBasicJob:
     """Async jobs with test instrumentation."""
 
     def __init__(
@@ -77,7 +75,8 @@ class TBasicJob(basic.Job):
         await_spawn=False,
         result=None,
     ):
-        super().__init__(name=name, deps=deps)
+        self.name = name
+        self.deps = deps
         self.before = set() if before is None else set(before)
         self.call = call
         self.async_sleep = async_sleep
@@ -110,7 +109,7 @@ class TBasicJob(basic.Job):
         return self.result if result is None else result
 
     async def __call__(self, ctx):
-        dep_results = await super().__call__(ctx)
+        dep_results = ctx.deps
         if self.deps:
             self.xevents.add('awaited results')
         ctx.logger.debug(f'Results from deps: {dep_results}')
