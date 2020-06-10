@@ -150,7 +150,7 @@ def main():
     events = []
     builder = Scheduler(workers=args.workers, event_handler=events.append)
     for job in jobs:
-        builder.add(job)
+        builder.add_job(job.name, job, job.deps)
     results = asyncio.run(builder.run(), debug=False)
     longest_work = max(sum(f.result().values()) for f in results.values())
     print(f'Finished with max(sum(work)) == {longest_work}')

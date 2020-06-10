@@ -57,7 +57,8 @@ class Fetcher(Job):
 
 events = []
 scheduler = Scheduler(workers=num_workers, event_handler=events.append)
-scheduler.add(Fetcher(Article.random_url))
+start_job = Fetcher(Article.random_url)
+scheduler.add_job(start_job.name, start_job)
 asyncio.run(scheduler.run())
 if 'plot' in sys.argv:
     from asyncjobs.plot_schedule import plot_schedule

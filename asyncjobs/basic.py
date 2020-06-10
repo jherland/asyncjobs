@@ -203,9 +203,6 @@ class Scheduler:
         if self.running:
             self._start_job(name)
 
-    def add(self, job):
-        return self.add_job(job.name, job, job.deps)
-
     async def _run_tasks(self, return_when):
         logger.info('Waiting for all jobs to complete…')
         self.event('await tasks', jobs=list(self.tasks.keys()))

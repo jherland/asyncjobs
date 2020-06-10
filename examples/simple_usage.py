@@ -28,5 +28,5 @@ job3.subprocess_argv = ['uptime']
 # Run all jobs in the scheduler
 s = Scheduler()
 for job in [job1, job2, job3]:
-    s.add(job)
+    s.add_job(job.name, job, job.deps)
 asyncio.run(s.run())
