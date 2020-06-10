@@ -99,8 +99,8 @@ class Scheduler(external_work.Scheduler):
     """Run jobs with their output multiplexed through LogMux.
 
     Extend Scheduler with two LogMux instances - one for stdout and one for
-    stderr - which are used by the above Job class to setup their own stdout
-    and stderr streams redirected through these instances.
+    stderr. Can be used by job coroutines redirect their stdout/stderr through
+    to a single pair of output streams controlled by the caller.
     """
 
     def __init__(

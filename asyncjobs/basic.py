@@ -1,70 +1,73 @@
+"""Basic job scheduler.
+
+A 'job' is a _coroutine_ with a _name_, and a set of _dependencies_:
+
+Coroutine
+
+Jobs are executed in an asynchronous context. As usual in async programming,
+a coroutine should never directly invoke any long, blocking operations, as
+this affects the entire async framework and prevents other jobs from
+progressing. Such work must instead be 'await'ed. See the external_work module
+for an extension to this module which provides helpers for starting and
+awaiting synchronous work in worker threads and/or subprocesses.
+
+A job coroutine may finish in one of three ways:
+  - complete successfully, by returning a value.
+  - fail, by raising an exception which aborts the coroutine.
+  - get cancelled, in which case this framework raises a CancelledError inside
+    the coroutine, causing it to abort.
+
+Name
+
+Jobs have a name that is unique to the Scheduler instance.
+The name is used in several contexts:
+  - When jobs specify dependency relationships between eachother.
+  - In events emitted while Scheduler.run() is executing
+  - As a key in the job results dict returned from Scheduler.run()
+
+Dependencies
+
+Jobs may specify a set of dependencies which are names of other jobs that must
+finish executing successfully before this job can proceed. The results of
+those other jobs are made available in the Context object passed to the job
+coroutine. If any of the dependencies fail (either by exception, or by getting
+cancelled), then this job will also be cancelled.
+
+Scheduler
+
+Jobs are created by calling Scheduler.add_job(). When the Scheduler.run() is
+called, each of the added jobs/coroutines will be invoked once with a Context
+object (see below) and wrapped in an asyncio.Task
+object which starts it running concurrently with other coroutines.
+
+The Scheduler.run() ends when all jobs have finished (one way or another) and
+returns a dict mapping job names to their corresponding asyncio.Future objects
+that encapsulate their result (return value, exception, or cancellation).
+
+This module implements the most basic Scheduler. Other modules in this package
+extend the Scheduler class (and accompanying Context class) with more features.
+
+Context
+
+Each job's coroutine is called with a single argument: ctx, which is a Context
+object the job may use to interact with the Scheduler or other parts of the
+surrounding framework. For example:
+
+  - While running, a job may await the result of one or more other jobs by
+    passing their names to ctx.results() (this is also how dependencies between
+    jobs are implemented): A job 'foo' may depend on jobs 'bar' and 'baz' by
+    awaiting their results:
+
+        results = ctx.results('bar', 'baz')
+
+  - A job may spawn another job by calling ctx.add_job().
+"""
 import asyncio
 import concurrent.futures
 import logging
 import time
 
 logger = logging.getLogger(__name__)
-
-
-class Job:
-    """Base class for jobs. Jobs have a name, dependencies, and are callable.
-
-    A Job instance represents a unit of work to be performed. The job is
-    identified by a name (.name), and its work is performed by calling it
-    (i.e. invoking the .__call__() async method, aka. coroutine).
-
-    Additionally, the job has a set of zero of more dependencies (.deps) which
-    are the names of other jobs that should complete successfully before this
-    job can proceed.
-
-    A job instance is submitted for execution by passing it to the .add()
-    method of a Scheduler instance. The Scheduler will then start the job
-    (during its .run()) by starting the job's .__call__() coroutine.
-    The scheduler passes itself to the job's .__call__(), to allow the job
-    implementation to communicate with the scheduler while it's working.
-
-    The return value from .__call__() is known as the job result. Any return
-    value from .__call__() is taken to mean that the job finished successfully.
-    This return value is accessible to other jobs (via Scheduler.results())
-    and ultimately included in the result from Scheduler.run().
-
-    If .__call__() raises an exception, the job is considered to have failed.
-    This may or may not cause the Scheduler to cancel/abort all other jobs,
-    but it will at least cause dependent jobs to be cancelled (when they call
-    Scheduler.results()).
-
-    The ordering of jobs according to their dependencies is implemented by the
-    default .__call__() implementation below, by asking (and waiting for) the
-    scheduler to return the results of its dependencies. Subclasses must make
-    sure to call this base class implementation before assuming anything about
-    the state of its dependencies.
-    """
-
-    def __init__(self, name, *, deps=None):
-        self.name = name
-        self.deps = deps
-
-    def __str__(self):
-        return self.name
-
-    def __repr__(self):
-        return f'{self.__class__.__name__}({self.name!r}, deps={self.deps!r})'
-
-    async def __call__(self, ctx):
-        """Perform the job.
-
-        The given Context object can be used to interact with the surrounding
-        job running machinery.
-
-        This superclass implementation awaits the results from our dependencies
-        and returns their results as a dict mapping job names to results.
-        Until this returns, we cannot assume that our dependencies have been
-        run at all.
-
-        Raises KeyError if any dependency has not been added to the scheduler.
-        Raises CancelledError if any dependency has failed.
-        """
-        return ctx.deps
 
 
 class Context:
@@ -120,18 +123,19 @@ class Context:
 
 
 class Scheduler:
-    """Async job scheduler. Run Job instances as concurrent tasks.
+    """Async job scheduler. Run job coroutines as concurrent tasks.
 
-    Jobs are added by passing Job instances to .add(). These will be scheduled
-    for execution when .run() is called. While running, jobs may use the
-    Context object passed to the coroutine to await each other's results or
-    spawn new jobs. When all jobs are completed (successfully or otherwise),
-    .run() will return a dictionary with all the job results.
+    Jobs are added by passing their names and coroutines to .add_job(). The
+    coroutines will be scheduled for execution when .run() is called. While
+    running, jobs may use the Context object passed to the coroutine to await
+    each other's results or spawn new jobs. When all jobs are completed
+    (successfully or otherwise), .run() will return a dictionary with all the
+    job results.
     """
 
     def __init__(self, *, event_handler=None, context_class=Context):
-        self.jobs = {}  # name -> Job
-        self.tasks = {}  # name -> Task object, aka. (future) result from job()
+        self.jobs = {}  # job name -> coroutine
+        self.tasks = {}  # job name -> Task object, aka. (future) job result
         self.running = False
         self.event_handler = event_handler
 

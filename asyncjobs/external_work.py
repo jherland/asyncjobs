@@ -88,7 +88,7 @@ class Context(basic.Context):
 class Scheduler(basic.Scheduler):
     """Manage jobs whose work is done in threads or subprocesses.
 
-    Extend Scheduler with methods that allow Job instances to perform work in
+    Extend Scheduler with methods that allow job coroutines to perform work in
     other threads or subprocesses, while keeping the number of _concurrent_
     threads/processes within the given limit.
     """
