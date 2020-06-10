@@ -49,7 +49,8 @@ class ParallelTimeWaster(TimeWaster):
             )
             name = f'{self.name}_{i}/{work}'
             ctx.logger.info(f'Splitting off {name}')
-            ctx.add_job(TimeWaster(name=name, work=work))
+            job = TimeWaster(name=name, work=work)
+            ctx.add_job(job.name, job)
             self.deps.add(name)
             self.work -= work
         return await super().__call__(ctx)

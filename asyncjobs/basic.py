@@ -110,13 +110,13 @@ class Context:
         self.logger.debug(f'Returning {results} from .results()')
         return results
 
-    def add_job(self, job):
+    def add_job(self, name, coro, deps=None):
         """Add a job to be run.
 
         Schedule the job to start immediately. Raise ValueError if a job with
         the same name has already been added.
         """
-        self._scheduler.add(job)
+        self._scheduler.add_job(name, coro, deps)
 
 
 class Scheduler:

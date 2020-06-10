@@ -51,7 +51,8 @@ class Fetcher(Job):
         sched = ctx._scheduler
         for href in hrefs:
             if len(sched.jobs) < num_articles and href not in sched:
-                ctx.add_job(self.__class__(href, self.level + 1))
+                job = self.__class__(href, self.level + 1)
+                ctx.add_job(job.name, job)
 
 
 events = []

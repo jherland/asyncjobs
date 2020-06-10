@@ -123,7 +123,7 @@ class TBasicJob(basic.Job):
         result = await self.do_work(ctx)
 
         for job in self.spawn:
-            ctx.add_job(job)
+            ctx.add_job(job.name, job, job.deps)
 
         if self.await_spawn and self.spawn:
             spawn = [job.name for job in self.spawn]
