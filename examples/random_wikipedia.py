@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Fetch a random wikipedia article and follow links from it
 import asyncio
-from asyncjobs import Job, Scheduler
+from asyncjobs import Scheduler
 import requests
 import sys
 import xml.etree.ElementTree as ET
@@ -31,9 +31,8 @@ class Article:
                 yield self.base_url + href
 
 
-class Fetcher(Job):
-    def __init__(self, url, level=1, **kwargs):
-        super().__init__(name=url, **kwargs)
+class Fetcher:
+    def __init__(self, url, level=1):
         self.url = url
         self.level = level
 
@@ -51,14 +50,12 @@ class Fetcher(Job):
         sched = ctx._scheduler
         for href in hrefs:
             if len(sched.jobs) < num_articles and href not in sched:
-                job = self.__class__(href, self.level + 1)
-                ctx.add_job(job.name, job)
+                ctx.add_job(href, self.__class__(href, self.level + 1))
 
 
 events = []
 scheduler = Scheduler(workers=num_workers, event_handler=events.append)
-start_job = Fetcher(Article.random_url)
-scheduler.add_job(start_job.name, start_job)
+scheduler.add_job(Article.random_url, Fetcher(Article.random_url))
 asyncio.run(scheduler.run())
 if 'plot' in sys.argv:
     from asyncjobs.plot_schedule import plot_schedule

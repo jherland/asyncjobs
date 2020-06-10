@@ -9,19 +9,19 @@ import random
 import sys
 import time
 
-from asyncjobs import Job, Scheduler
+from asyncjobs import Scheduler
 
 logger = logging.getLogger('random_jobs')
 
 
-class TimeWaster(Job):
-    def __init__(self, work, **kwargs):
+class TimeWaster:
+    def __init__(self, *, name, work, deps=None):
+        self.name = name
         self.work = work
-        super().__init__(**kwargs)
+        self.deps = deps
 
     def __str__(self):
-        deps = ', '.join(sorted(self.deps))
-        return f'{super().__str__()}[{deps}]/{self.work}'
+        return f'{self.name}[{", ".join(sorted(self.deps))}]/{self.work}'
 
     def do_work(self, ctx):
         ctx.logger.info(f'Doing own work: {self.work}')
@@ -31,42 +31,10 @@ class TimeWaster(Job):
 
     async def __call__(self, ctx):
         ctx.logger.info(self)
-        self.dep_results = await super().__call__(ctx)
         return await ctx.call_in_thread(self.do_work, ctx)
 
 
-class ParallelTimeWaster(TimeWaster):
-    def __init__(self, *, work_threshold, **kwargs):
-        self.work_threshold = work_threshold
-        super().__init__(**kwargs)
-
-    async def __call__(self, ctx):
-        i = 0
-        while self.work > self.work_threshold:
-            i += 1
-            work = random.randint(
-                self.work_threshold * 2 // 3, self.work_threshold
-            )
-            name = f'{self.name}_{i}/{work}'
-            ctx.logger.info(f'Splitting off {name}')
-            job = TimeWaster(name=name, work=work)
-            ctx.add_job(job.name, job)
-            self.deps.add(name)
-            self.work -= work
-        return await super().__call__(ctx)
-
-    def do_work(self, ctx):
-        result = {}
-        ctx.logger.info('From deps:')
-        for dep, dep_result in self.dep_results.items():
-            ctx.logger.info(f'  {dep}: {dep_result}')
-            result.update(dep_result)
-        result.update(super().do_work(ctx))
-        ctx.logger.info(f'Returning {result}')
-        return result
-
-
-class RandomJob(ParallelTimeWaster):
+class RandomJob(TimeWaster):
     @classmethod
     def generate(cls, dep_prob, max_work=100, work_threshold=None):
         if work_threshold is None:
@@ -86,6 +54,35 @@ class RandomJob(ParallelTimeWaster):
             )
             names.append(name)
             i += 1
+
+    def __init__(self, *, work_threshold, **kwargs):
+        super().__init__(**kwargs)
+        self.work_threshold = work_threshold
+
+    async def __call__(self, ctx):
+        i = 0
+        while self.work > self.work_threshold:
+            i += 1
+            work = random.randint(
+                self.work_threshold * 2 // 3, self.work_threshold
+            )
+            name = f'{self.name}_{i}/{work}'
+            ctx.logger.info(f'Splitting off {name}')
+            job = TimeWaster(name=name, work=work)
+            ctx.add_job(job.name, job)
+            self.deps.add(name)
+            self.work -= work
+        return await super().__call__(ctx)
+
+    def do_work(self, ctx):
+        result = {}
+        ctx.logger.info('From deps:')
+        for dep, dep_result in ctx.deps.items():
+            ctx.logger.info(f'  {dep}: {dep_result}')
+            result.update(dep_result)
+        result.update(super().do_work(ctx))
+        ctx.logger.info(f'Returning {result}')
+        return result
 
 
 def main():

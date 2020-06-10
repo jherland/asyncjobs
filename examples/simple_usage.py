@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # Run three simple jobs in sequence
 import asyncio
-from asyncjobs import Job, Scheduler
+from asyncjobs import Scheduler
 
 
-# Helper function
+# Helper functions
+
+
 def sleep():
     import time
 
@@ -13,20 +15,23 @@ def sleep():
     print(f'{time.ctime()}: Finished sleep')
 
 
+async def sleep_job(ctx):
+    return await ctx.call_in_thread(sleep)
+
+
+async def uptime(ctx):
+    return await ctx.run_in_subprocess(['uptime'])
+
+
+s = Scheduler()
+
 # Job #1 prints uptime
-job1 = Job('#1')
-job1.subprocess_argv = ['uptime']
+s.add_job('#1', uptime)
 
 # Job #2 waits for #1 and then sleeps in a thread
-job2 = Job('#2', deps={'#1'})
-job2.thread_func = sleep
+s.add_job('#2', sleep_job, deps={'#1'})
 
 # Job #3 waits for #2 and then prints uptime (again)
-job3 = Job('#3', deps={'#2'})
-job3.subprocess_argv = ['uptime']
+s.add_job('#3', uptime, deps={'#2'})
 
-# Run all jobs in the scheduler
-s = Scheduler()
-for job in [job1, job2, job3]:
-    s.add_job(job.name, job, job.deps)
 asyncio.run(s.run())
