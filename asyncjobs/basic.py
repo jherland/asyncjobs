@@ -42,7 +42,7 @@ class Job:
 
     def __init__(self, name, *, deps=None):
         self.name = name
-        self.deps = set() if deps is None else set(deps)
+        self.deps = deps
 
     def __str__(self):
         return self.name
@@ -64,10 +64,7 @@ class Job:
         Raises KeyError if any dependency has not been added to the scheduler.
         Raises CancelledError if any dependency has failed.
         """
-        if self.deps:
-            ctx.logger.debug(f'Awaiting dependencies {self.deps}…')
-            return await ctx.results(*self.deps)
-        return {}
+        return ctx.deps
 
 
 class Context:
@@ -207,7 +204,7 @@ class Scheduler:
             self._start_job(name)
 
     def add(self, job):
-        return self.add_job(job.name, job)
+        return self.add_job(job.name, job, job.deps)
 
     async def _run_tasks(self, return_when):
         logger.info('Waiting for all jobs to complete…')

@@ -89,6 +89,15 @@ class TBasicJob(basic.Job):
         self.xevents.add('add')
         self.xevents.add('start')
 
+        # self.deps is processed _before_ .__call__() is invoked
+        if self.deps:
+            if 'MISSING' in self.deps:
+                self.xevents.add('finish', fate='failed')  # expect KeyError
+            else:
+                self.xevents.add(
+                    'await results', jobs=list(self.deps), pending=Whatever
+                )
+
     def descendants(self):
         for spawn in self.spawn:
             yield spawn
@@ -101,13 +110,6 @@ class TBasicJob(basic.Job):
         return self.result if result is None else result
 
     async def __call__(self, ctx):
-        if self.deps:
-            if 'MISSING' in self.deps:
-                self.xevents.add('finish', fate='failed')  # expect KeyError
-            else:
-                self.xevents.add(
-                    'await results', jobs=list(self.deps), pending=Whatever
-                )
         dep_results = await super().__call__(ctx)
         if self.deps:
             self.xevents.add('awaited results')
@@ -254,7 +256,7 @@ def scheduler_session(scheduler_class, todo, check_events=True):
     events = EventVerifier()
     scheduler = scheduler_class(event_handler=events)
     for job in todo:
-        scheduler.add(job)
+        scheduler.add_job(job.name, job, getattr(job, 'deps', None))
     yield scheduler
 
     if check_events:
