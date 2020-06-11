@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # Fetch a random wikipedia article and follow links from it
 import asyncio
+from bs4 import BeautifulSoup
 from functools import partial
 import requests
 import sys
-import xml.etree.ElementTree as ET
 
 from asyncjobs import Scheduler
 
@@ -18,19 +18,19 @@ class Article:
 
     def __init__(self, url):
         resp = requests.get(url=url, allow_redirects=True)
-        self.html = ET.fromstring(resp.content)
+        self.html = BeautifulSoup(resp.content, features='html.parser')
 
     def title(self):
-        ret = self.html.find('head').find('title').text
+        ret = self.html.title.string
         if ret.endswith('- Wikipedia'):
             ret = ret.rsplit('-', 1)[0].strip()
         return ret
 
     def hrefs(self):
-        for a in self.html.iterfind('.//p//a'):
-            href = a.attrib.get('href', '')
-            if href.startswith('/wiki/'):
-                yield self.base_url + href
+        for p in self.html.find_all('p'):
+            for a in p.find_all('a'):
+                if a.get('href', '').startswith('/wiki/'):
+                    yield self.base_url + a['href']
 
 
 async def fetch(url, level, ctx):

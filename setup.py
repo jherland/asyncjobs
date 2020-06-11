@@ -36,6 +36,11 @@ setup(
         "dev": ["black", "flake8", "nox"],
         "dist": ["check-manifest", "twine", "wheel"],
         "plot": ["numpy", "plotly"],
-        "test": ["pytest>=5.4.0", "pytest-asyncio", "requests"],
+        "test": [
+            "beautifulsoup4",
+            "pytest>=5.4.0",
+            "pytest-asyncio",
+            "requests",
+        ],
     },
 )
