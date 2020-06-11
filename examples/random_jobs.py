@@ -21,17 +21,18 @@ class TimeWaster:
         self.deps = deps
 
     def __str__(self):
-        return f'{self.name}[{", ".join(sorted(self.deps))}]/{self.work}'
+        deps = ', '.join(sorted(self.deps)) if self.deps is not None else 'N/A'
+        return f'{self.name} ({deps})'
+
+    async def __call__(self, ctx):
+        ctx.logger.info(self)
+        return await ctx.call_in_thread(self.do_work, ctx)
 
     def do_work(self, ctx):
         ctx.logger.info(f'Doing own work: {self.work}')
         time.sleep(self.work / 1000)
         ctx.logger.info(f'Finished own work: {self.work}')
         return {self.name: self.work}
-
-    async def __call__(self, ctx):
-        ctx.logger.info(self)
-        return await ctx.call_in_thread(self.do_work, ctx)
 
 
 class RandomJob(TimeWaster):
@@ -130,7 +131,7 @@ def main():
     handler.setFormatter(
         logging.Formatter(
             fmt=(
-                '{relativeCreated:8.0f} {process:5}/{threadName:10} '
+                '{relativeCreated:8.0f} {process:5}/{threadName:16} '
                 '{name:>16}: {message}'
             ),
             style='{',
@@ -145,10 +146,10 @@ def main():
     jobs = list(itertools.islice(job_generator, args.num_jobs))
 
     events = []
-    builder = Scheduler(workers=args.workers, event_handler=events.append)
+    s = Scheduler(workers=args.workers, event_handler=events.append)
     for job in jobs:
-        builder.add_job(job.name, job, job.deps)
-    results = asyncio.run(builder.run(), debug=False)
+        s.add_job(job.name, job, job.deps)
+    results = asyncio.run(s.run(), debug=False)
     longest_work = max(sum(f.result().values()) for f in results.values())
     print(f'Finished with max(sum(work)) == {longest_work}')
 

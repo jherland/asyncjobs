@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # Fetch a random wikipedia article and follow links from it
 import asyncio
-from asyncjobs import Scheduler
+from functools import partial
 import requests
 import sys
 import xml.etree.ElementTree as ET
+
+from asyncjobs import Scheduler
 
 num_articles = 10
 num_workers = 4
@@ -31,31 +33,26 @@ class Article:
                 yield self.base_url + href
 
 
-class Fetcher:
-    def __init__(self, url, level=1):
-        self.url = url
-        self.level = level
-
-    def thread_func(self):
-        indent = '  ' * self.level
-        print(f'{indent}  fetching {self.url}...')
-        a = Article(self.url)
+async def fetch(url, level, ctx):
+    def fetch_in_thread():
+        indent = '  ' * level
+        print(f'{indent}  fetching {url}...')
+        a = Article(url)
         title = a.title()
         hrefs = list(a.hrefs())
         print(f'{indent}* [{title}] links to {len(hrefs)} articles')
         return title, hrefs
 
-    async def __call__(self, ctx):
-        title, hrefs = await super().__call__(ctx)
-        sched = ctx._scheduler
-        for href in hrefs:
-            if len(sched.jobs) < num_articles and href not in sched:
-                ctx.add_job(href, self.__class__(href, self.level + 1))
+    title, hrefs = await ctx.call_in_thread(fetch_in_thread)
+    scheduler = ctx._scheduler
+    for href in hrefs:
+        if len(scheduler.jobs) < num_articles and href not in scheduler:
+            ctx.add_job(href, partial(fetch, href, level + 1))
 
 
 events = []
 scheduler = Scheduler(workers=num_workers, event_handler=events.append)
-scheduler.add_job(Article.random_url, Fetcher(Article.random_url))
+scheduler.add_job(Article.random_url, partial(fetch, Article.random_url, 1))
 asyncio.run(scheduler.run())
 if 'plot' in sys.argv:
     from asyncjobs.plot_schedule import plot_schedule
