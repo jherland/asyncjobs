@@ -6,8 +6,8 @@ from conftest import (
     abort_in,
     assert_elapsed_time_within,
     Cancelled,
-    scheduler_session,
     TExternalWorkJob,
+    verified_events,
     verify_tasks,
 )
 
@@ -17,15 +17,21 @@ TJob = TExternalWorkJob
 
 
 @pytest.fixture
-def run(scheduler_with_workers):
-    Scheduler = scheduler_with_workers(
+def Scheduler(scheduler_with_workers):
+    return scheduler_with_workers(
         signal_handling.Scheduler, external_work.Scheduler
     )
 
-    async def _run(todo, abort_after=None, **run_args):
-        with scheduler_session(Scheduler, todo) as scheduler:
+
+@pytest.fixture
+def run(Scheduler):
+    async def _run(todo, abort_after=None):
+        scheduler = Scheduler()
+        with verified_events(scheduler, todo):
+            for job in todo:
+                scheduler.add_job(job.name, job, getattr(job, 'deps', None))
             with abort_in(abort_after):
-                return await scheduler.run(**run_args)
+                return await scheduler.run()
 
     return _run
 

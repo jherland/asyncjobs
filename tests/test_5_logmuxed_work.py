@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import functools
 from pathlib import Path
 import pytest
@@ -10,8 +11,8 @@ from asyncjobs import logmuxed_work, signal_handling
 from conftest import (
     abort_in,
     assert_elapsed_time_within,
-    scheduler_session,
     TExternalWorkJob,
+    verified_events,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -121,15 +122,25 @@ class TJob(TExternalWorkJob):
 
 
 @pytest.fixture
-def run(scheduler_with_workers):
-    Scheduler = scheduler_with_workers(
+def Scheduler(scheduler_with_workers):
+    return scheduler_with_workers(
         signal_handling.Scheduler, logmuxed_work.Scheduler
     )
 
-    async def _run(todo, abort_after=None, check_events=True, **run_args):
-        with scheduler_session(Scheduler, todo, check_events) as scheduler:
+
+@pytest.fixture
+def run(Scheduler):
+    async def _run(todo, abort_after=None, check_events=True):
+        scheduler = Scheduler()
+        if check_events:
+            cm = verified_events(scheduler, todo)
+        else:
+            cm = contextlib.nullcontext()
+        with cm:
+            for job in todo:
+                scheduler.add_job(job.name, job, getattr(job, 'deps', None))
             with abort_in(abort_after):
-                return await scheduler.run(**run_args)
+                return await scheduler.run()
 
     return _run
 

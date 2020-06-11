@@ -5,8 +5,8 @@ from asyncjobs import external_work
 
 from conftest import (
     Cancelled,
-    scheduler_session,
     TExternalWorkJob,
+    verified_events,
     verify_tasks,
 )
 
@@ -16,14 +16,23 @@ TJob = TExternalWorkJob
 
 
 @pytest.fixture
-def run(scheduler_with_workers):
-    Scheduler = scheduler_with_workers(external_work.Scheduler)
+def Scheduler(scheduler_with_workers):
+    return scheduler_with_workers(external_work.Scheduler)
 
-    async def _run(todo, **run_args):
-        with scheduler_session(Scheduler, todo) as scheduler:
-            return await scheduler.run(**run_args)
+
+@pytest.fixture
+def run(Scheduler):
+    async def _run(todo):
+        scheduler = Scheduler()
+        with verified_events(scheduler, todo):
+            for job in todo:
+                scheduler.add_job(job.name, job, getattr(job, 'deps', None))
+            return await scheduler.run()
 
     return _run
+
+
+# simple scenarios with threads/subprocesses
 
 
 async def test_one_ok_job_in_thread(run):
