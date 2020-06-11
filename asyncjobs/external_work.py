@@ -102,6 +102,18 @@ class Scheduler(basic.Scheduler):
         assert issubclass(context_class, Context)
         super().__init__(context_class=context_class, **kwargs)
 
+    def add_thread_job(self, name, func, *args, deps=None):
+        async def coro(ctx):
+            return await ctx.call_in_thread(func, *args)
+
+        return self.add_job(name, coro, deps)
+
+    def add_subprocess_job(self, name, argv, *, deps=None, **kwargs):
+        async def coro(ctx):
+            return await ctx.run_in_subprocess(argv, **kwargs)
+
+        return self.add_job(name, coro, deps)
+
     def _start_in_thread(self, func, *args):
         if self.worker_threads is None:
             self.worker_threads = concurrent.futures.ThreadPoolExecutor(

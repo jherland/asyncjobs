@@ -79,3 +79,97 @@ async def test_one_failed_between_two_in_subprocs_cancels_last(run, tmp_path):
     )
     assert foo_path.is_file()
     assert not baz_path.exists()
+
+
+# add_thread_job() helper
+
+
+async def test_one_threaded_job_before_another(Scheduler):
+    def first_job():
+        return 'return value from first job'
+
+    def second_job():
+        return 'return value from second job'
+
+    scheduler = Scheduler()
+    scheduler.add_thread_job('first_job', first_job)
+    scheduler.add_thread_job('second_job', second_job, deps={'first_job'})
+    done = await scheduler.run()
+
+    assert verify_tasks(
+        done,
+        {
+            'first_job': 'return value from first job',
+            'second_job': 'return value from second job',
+        },
+    )
+
+
+async def test_one_threaded_failure_cancels_the_next(Scheduler):
+    def first_job():
+        raise ValueError('FAIL')
+
+    def second_job():
+        return 'return value from second job'
+
+    scheduler = Scheduler()
+    scheduler.add_thread_job('first_job', first_job)
+    scheduler.add_thread_job('second_job', second_job, deps={'first_job'})
+    done = await scheduler.run()
+
+    assert verify_tasks(
+        done, {'first_job': ValueError('FAIL'), 'second_job': Cancelled},
+    )
+
+
+# add_subprocess_job() helper
+
+
+async def test_one_subproc_job_before_another(Scheduler):
+    scheduler = Scheduler()
+    scheduler.add_subprocess_job('first_job', ['true'])
+    scheduler.add_subprocess_job('second_job', ['false'], deps={'first_job'})
+    done = await scheduler.run()
+
+    assert verify_tasks(
+        done, {'first_job': 0, 'second_job': CalledProcessError(1, ['false'])},
+    )
+
+
+async def test_one_subprocess_failure_with_check_cancels_the_next(Scheduler):
+    scheduler = Scheduler()
+    scheduler.add_subprocess_job('first_job', ['false'], check=True)
+    scheduler.add_subprocess_job('second_job', ['true'], deps={'first_job'})
+    done = await scheduler.run()
+
+    assert verify_tasks(
+        done,
+        {
+            'first_job': CalledProcessError(1, ['false']),
+            'second_job': Cancelled,
+        },
+    )
+
+
+async def test_one_subprocess_failure_wo_check_proceeds_to_next(Scheduler):
+    scheduler = Scheduler()
+    scheduler.add_subprocess_job('first_job', ['false'], check=False)
+    scheduler.add_subprocess_job('second_job', ['true'], deps={'first_job'})
+    done = await scheduler.run()
+
+    assert verify_tasks(done, {'first_job': 1, 'second_job': 0})
+
+
+async def test_one_subprocess_failure_by_default_cancels_the_next(Scheduler):
+    scheduler = Scheduler()
+    scheduler.add_subprocess_job('first_job', ['false'])
+    scheduler.add_subprocess_job('second_job', ['true'], deps={'first_job'})
+    done = await scheduler.run()
+
+    assert verify_tasks(
+        done,
+        {
+            'first_job': CalledProcessError(1, ['false']),
+            'second_job': Cancelled,
+        },
+    )
