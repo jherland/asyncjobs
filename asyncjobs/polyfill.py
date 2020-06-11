@@ -121,3 +121,13 @@ if not hasattr(contextlib, 'asynccontextmanager'):
         return helper
 
     setattr(contextlib, 'asynccontextmanager', asynccontextmanager)
+
+
+# contextlib.nullcontext added in Python v3.7
+if not hasattr(contextlib, 'nullcontext'):
+
+    @contextlib.contextmanager
+    def nullcontext(enter_result=None):
+        yield enter_result
+
+    setattr(contextlib, 'nullcontext', nullcontext)
