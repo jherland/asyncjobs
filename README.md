@@ -17,23 +17,34 @@ Using asyncio to run jobs in worker threads/processes.
 ## Description
 
 A job scheduler for running asynchronous (and synchronous) jobs with
-dependencies using asyncio. Jobs are identified by their _name_ and implement
-an async `__call__` method. Jobs may await other jobs or schedule work to be
-done in a thread or subprocess. Jobs are run by a Scheduler, which control the
-execution of the jobs, as well as the number of concurrent threads and
-processes doing work. The Scheduler emits events which allow e.g. progress and
-statistics to be easily collected and monitored. A separate module is provided
-to turn Scheduler events into an interactive scheduling plot:
+dependencies using asyncio. Jobs are _coroutines_ (`async def` functions) with
+a _name_, and (optionally) a set of _dependencies_ (a set of names of other
+jobs that must complete successfully before this job can start). The job
+coroutine may await the results from other jobs, schedule work to be done in a
+thread or subprocess, or various other things provided by the particular
+`Context` object passed to the coroutine. The job coroutines are run by a
+`Scheduler`, which control the execution of the jobs, as well as the number of
+concurrent threads and processes doing work. The Scheduler emits events which
+allow e.g. progress and statistics to be easily collected and monitored.
+A separate module is provided to turn Scheduler events into an interactive
+scheduling plot:
 
 ![Example schedule plot](
 https://github.com/jherland/asyncjobs/raw/master/examples/random_jobs_plot.png)
 
-Jobs complete successfully by returning (with or without a return value). Any
-exception propagated from a job's `__call__` method is regarded as a failure.
-Any job that depend on (i.e. await the result of) another job will be
-automatically cancelled by the scheduler if that other job fails.
-The Scheduler handles cancellation (e.g. _Ctrl-C_) by cancelling all ongoing
-and remaining tasks as quickly and cleanly as possible.
+A job coroutine completes in one of three ways:
+
+ - Jobs complete _successfully_ by returning, and the returned value (if any) is
+   known as the _job result_.
+ - Jobs are considered to have _failed_ if any exception propagates from its
+   coroutine. Any job that depend on (i.e. await the result of) another job
+   will be automatically cancelled by the scheduler if that other job fails.
+ - Jobs may be _cancelled_, which is implented by the scheduler raising an
+   `asyncio.CancelledError` inside the coroutine, and having it propagate out
+   of the corouting.
+
+The Scheduler handles its own cancellation (e.g. _Ctrl-C_) by cancelling all
+ongoing and remaining tasks as quickly and cleanly as possible.
 
 ## Usage examples
 
@@ -41,31 +52,27 @@ and remaining tasks as quickly and cleanly as possible.
 
 ```python
 import asyncio
-from asyncjobs import Job, Scheduler
+from asyncjobs import Scheduler
+import time
 
-# Helper function
-def sleep():
-    import time
+
+def sleep():  # Run in a worker thread by job #2 below
     print(f'{time.ctime()}: Sleep for a second')
     time.sleep(1)
     print(f'{time.ctime()}: Finished sleep')
 
+
+s = Scheduler()
+
 # Job #1 prints uptime
-job1 = Job('#1')
-job1.subprocess_argv = ['uptime']
+s.add_subprocess_job('#1', ['uptime'])
 
 # Job #2 waits for #1 and then sleeps in a thread
-job2 = Job('#2', deps={'#1'})
-job2.thread_func = sleep
+s.add_thread_job('#2', sleep, deps={'#1'})
 
 # Job #3 waits for #2 and then prints uptime (again)
-job3 = Job('#3', deps={'#2'})
-job3.subprocess_argv = ['uptime']
+s.add_subprocess_job('#3', ['uptime'], deps={'#2'})
 
-# Run all jobs in the scheduler
-s = Scheduler()
-for job in [job1, job2, job3]:
-    s.add(job)
 asyncio.run(s.run())
 ```
 
@@ -89,26 +96,25 @@ until 10 articles have been fetched. Sample output:
 
 ```
     fetching https://en.wikipedia.org/wiki/Special:Random...
-  * [Indonesia–Mongolia relations] links to 7 articles
-      fetching https://en.wikipedia.org/wiki/Indonesia...
-      fetching https://en.wikipedia.org/wiki/Mongolia...
-      fetching https://en.wikipedia.org/wiki/Jakarta...
-      fetching https://en.wikipedia.org/wiki/Mongolian_National_University,_Ulan_Bator...
-    * [Mongolia] links to 529 articles
-      fetching https://en.wikipedia.org/wiki/Sukarno...
-    * [Indonesia] links to 697 articles
-      fetching https://en.wikipedia.org/wiki/Megawati_Soekarnoputri...
-    * [Jakarta] links to 757 articles
-      fetching https://en.wikipedia.org/wiki/Susilo_Bambang_Yudhoyono...
-    * [Mongolian National University] links to 2 articles
-        fetching https://en.wikipedia.org/wiki/Mongolian_language...
-    * [Sukarno] links to 523 articles
-        fetching https://en.wikipedia.org/wiki/Mongolian_script...
-    * [Susilo Bambang Yudhoyono] links to 159 articles
-    * [Megawati Sukarnoputri] links to 88 articles
-      * [Mongolian language] links to 259 articles
-      * [Mongolian script] links to 142 articles
-
+  * [Nauru national netball team] links to 3 articles
+      fetching https://en.wikipedia.org/wiki/Nauru...
+      fetching https://en.wikipedia.org/wiki/Netball...
+      fetching https://en.wikipedia.org/wiki/Netball_at_the_1985_South_Pacific_Mini_Games...
+    * [Netball at the 1985 South Pacific Mini Games] links to 4 articles
+    * [Netball] links to 114 articles
+        fetching https://en.wikipedia.org/wiki/1985_South_Pacific_Mini_Games...
+        fetching https://en.wikipedia.org/wiki/Rarotonga...
+        fetching https://en.wikipedia.org/wiki/Cook_Islands...
+    * [Nauru] links to 257 articles
+        fetching https://en.wikipedia.org/wiki/Ball_sport...
+      * [Ball game] links to 8 articles
+        fetching https://en.wikipedia.org/wiki/Commonwealth_of_Nations...
+      * [Rarotonga] links to 43 articles
+        fetching https://en.wikipedia.org/wiki/Netball_Superleague...
+      * [Cook Islands] links to 124 articles
+      * [Netball Superleague] links to 25 articles
+      * [Commonwealth of Nations] links to 434 articles
+      * [1985 South Pacific Mini Games] links to 5 articles
 ```
 
 ### Wasting time efficiently across multiple threads
