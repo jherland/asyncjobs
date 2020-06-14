@@ -347,7 +347,6 @@ async def test_redirected_job_no_decoration(run, verify_output):
 
 
 async def test_redirected_job_decorate_without_logger(run, verify_output):
-
     dec_out, dec_err = decorators('foo')
 
     @logmuxed_work.redirected_job(dec_out, dec_err, False)
@@ -364,7 +363,6 @@ async def test_redirected_job_decorate_without_logger(run, verify_output):
 
 
 async def test_redirected_job_decorate_err_with_logger(run, verify_output):
-
     _, dec_err = decorators('foo')
 
     @logmuxed_work.redirected_job(decorate_err=dec_err)

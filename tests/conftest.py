@@ -318,7 +318,9 @@ def verify_output(capfd):
             else:  # no match for any stream
                 assert False, f'actual: {actual_line!r}, expect: {expected!r}'
         # no more lines expected
-        assert all(e == [] for e in expect_lines_from_streams)
+        for e in expect_lines_from_streams:
+            if len(e):
+                assert False, f'expected lines not found: {e!r}'
 
     def _verify_output(expect_stdout_streams, expect_stderr_streams=None):
         actual = capfd.readouterr()

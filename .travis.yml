@@ -8,4 +8,4 @@ python:
 install:
   - pip install ".[test]"
 script:
-  - pytest
+  - pytest -x --log-level=debug
