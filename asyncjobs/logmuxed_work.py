@@ -114,6 +114,5 @@ class Scheduler(external_work.Scheduler):
 
     async def _run_tasks(self, *args, **kwargs):
         logger.debug('Starting LogMux instances…')
-        async with self.outmux:
-            async with self.errmux:
-                await super()._run_tasks(*args, **kwargs)
+        async with self.outmux, self.errmux:
+            await super()._run_tasks(*args, **kwargs)

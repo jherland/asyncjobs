@@ -12,23 +12,21 @@ async def test_no_output(verify_output):
 
 
 async def test_one_stream_undecorated(verify_output):
-    async with LogMux() as logmux:
-        async with logmux.new_stream() as f:
-            print('This is the first line', file=f)
-            print('This is the second line', file=f)
+    async with LogMux() as logmux, logmux.new_stream() as f:
+        print('This is the first line', file=f)
+        print('This is the second line', file=f)
     assert verify_output(
         [['This is the first line', 'This is the second line']]
     )
 
 
 async def test_two_streams_undecorated(verify_output):
-    async with LogMux() as logmux:
-        async with logmux.new_stream() as f:
-            print('This is stream 1 line 1', file=f)
-            async with logmux.new_stream() as g:
-                print('This is stream 2 line 1', file=g)
-                print('This is stream 2 line 2', file=g)
-            print('This is stream 1 line 2', file=f)
+    async with LogMux() as logmux, logmux.new_stream() as f:
+        print('This is stream 1 line 1', file=f)
+        async with logmux.new_stream() as g:
+            print('This is stream 2 line 1', file=g)
+            print('This is stream 2 line 2', file=g)
+        print('This is stream 1 line 2', file=f)
     assert verify_output(
         [
             ['This is stream 1 line 1', 'This is stream 1 line 2'],
