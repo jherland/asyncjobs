@@ -97,10 +97,10 @@ def plot_schedule(
             'awaited results': 'diamond-wide-open',
             'await worker slot': 'diamond-tall-open',
             'awaited worker slot': 'diamond-wide-open',
-            'await worker thread': 'triangle-right',
-            'awaited worker thread': 'triangle-left',
-            'await worker proc': 'triangle-right',
-            'awaited worker proc': 'triangle-left',
+            'start work in thread': 'triangle-right',
+            'finish work in thread': 'triangle-left',
+            'start work in subprocess': 'triangle-right',
+            'finish work in subprocess': 'triangle-left',
             'finish': 'x',
         }
         return dict(
@@ -133,10 +133,10 @@ def plot_schedule(
             'awaited results': 0.6,
             'await worker slot': 0.2,
             'awaited worker slot': 0.6,
-            'await worker thread': 0.8,
-            'awaited worker thread': 0.6,
-            'await worker proc': 0.8,
-            'awaited worker proc': 0.6,
+            'start work in thread': 0.8,
+            'finish work in thread': 0.6,
+            'start work in subprocess': 0.8,
+            'finish work in subprocess': 0.6,
         }
         return dict(
             name=a['task'],

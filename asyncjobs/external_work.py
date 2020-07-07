@@ -36,11 +36,11 @@ class Context(basic.Context):
         async with self.reserve_worker():
             try:
                 self.logger.debug(f'-> starting {func} in worker thread…')
-                self.event('await worker thread', func=str(func))
+                self.event('start work in thread', func=str(func))
                 future = self._scheduler._start_in_thread(func, *args)
                 future.add_done_callback(
                     lambda fut: self.event(
-                        'awaited worker thread',
+                        'finish work in thread',
                         fate=self._scheduler._fate(fut),
                     )
                 )
@@ -59,7 +59,7 @@ class Context(basic.Context):
         returncode = None
         async with self.reserve_worker():
             self.logger.debug(f'-> starting {argv} in subprocess…')
-            self.event('await worker proc', argv=argv)
+            self.event('start work in subprocess', argv=argv)
             proc = await asyncio.create_subprocess_exec(
                 *argv, stdin=stdin, stdout=stdout, stderr=stderr
             )
@@ -80,7 +80,7 @@ class Context(basic.Context):
                     self.logger.debug(f'{proc} killed.')
                 raise
             finally:
-                self.event('awaited worker proc', returncode=returncode)
+                self.event('finish work in subprocess', returncode=returncode)
         if check and returncode != 0:
             raise subprocess.CalledProcessError(returncode, argv)
         return returncode

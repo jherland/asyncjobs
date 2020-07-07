@@ -174,18 +174,20 @@ class TExternalWorkJob(TBasicJob):
         ctx.logger.debug(f'Await call {self.thread} in thread…')
         self.xevents.add('await worker slot')
         self.xevents.add('awaited worker slot', may_cancel=True)
-        self.xevents.add('await worker thread', may_cancel=True, func=Whatever)
+        self.xevents.add(
+            'start work in thread', may_cancel=True, func=Whatever
+        )
         try:
             ret = await ctx.call_in_thread(self.thread, ctx)
-            self.xevents.add('awaited worker thread', fate='success')
+            self.xevents.add('finish work in thread', fate='success')
         except asyncio.CancelledError:
             self.xevents.add(
-                'awaited worker thread', may_cancel=True, fate='cancelled',
+                'finish work in thread', may_cancel=True, fate='cancelled',
             )
             raise
         except Exception as e:
             ret = e
-            self.xevents.add('awaited worker thread', fate='failed')
+            self.xevents.add('finish work in thread', fate='failed')
         ctx.logger.debug(f'Finished thread call: {ret!r}')
         return ret
 
@@ -194,21 +196,21 @@ class TExternalWorkJob(TBasicJob):
         self.xevents.add('await worker slot')
         self.xevents.add('awaited worker slot', may_cancel=True)
         self.xevents.add(
-            'await worker proc', may_cancel=True, argv=self.subproc
+            'start work in subprocess', may_cancel=True, argv=self.subproc
         )
         try:
             ret = await ctx.run_in_subprocess(self.subproc, check=True)
-            self.xevents.add('awaited worker proc', returncode=0)
+            self.xevents.add('finish work in subprocess', returncode=0)
         except asyncio.CancelledError:
             self.xevents.add(
-                'awaited worker proc', may_cancel=True, returncode=-15
+                'finish work in subprocess', may_cancel=True, returncode=-15
             )
             raise
         except Exception as e:
             ret = e
             if isinstance(e, CalledProcessError):
                 self.xevents.add(
-                    'awaited worker proc', returncode=e.returncode
+                    'finish work in subprocess', returncode=e.returncode
                 )
         ctx.logger.debug(f'Finished subprocess run: {ret}')
         return ret
