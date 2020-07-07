@@ -135,7 +135,7 @@ class TBasicJob:
             assert not ctx._scheduler.tasks[b].done()  # but not yet finished
 
         if isinstance(result, Exception):
-            ctx.logger.info(f'Raising exception: {result}')
+            ctx.logger.info(f'Raising exception: {result!r}')
             self.xevents.add('finish', fate='failed')
             raise result
         else:

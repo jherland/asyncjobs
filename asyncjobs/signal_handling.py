@@ -22,7 +22,11 @@ class Scheduler(basic.Scheduler):
     def _caught_signal(self, signum, this_task):
         logger.warning(f'Caught signal {signum}!')
         assert self.running and not this_task.done()
-        logger.warning(f'Cancelling task {this_task}…')
+        name = self.__class__.__name__
+        total = self.workers
+        act = total - self.worker_semaphore._value
+        logger.warning(f'Cancelling {name} with {act}/{total} active workers…')
+        logger.debug(f'Cancelling task {this_task}…')
         this_task.cancel()
 
     @contextmanager
@@ -37,7 +41,7 @@ class Scheduler(basic.Scheduler):
         try:
             yield
         except asyncio.CancelledError:
-            logger.warning('Intercepted Cancelled on the way out')
+            logger.info('Intercepted Cancelled on the way out')
         finally:
             for signum in self.handle_signals:
                 loop.remove_signal_handler(signum)

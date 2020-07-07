@@ -49,7 +49,7 @@ class Context(basic.Context):
                 self.logger.debug(f'<- {result!r} from worker')
                 return result
             except Exception as e:
-                self.logger.warning(f'<- Exception {e} from worker!')
+                self.logger.warning(f'<- Exception {e!r} from worker!')
                 raise
 
     async def run_in_subprocess(
@@ -67,16 +67,17 @@ class Context(basic.Context):
                 self.logger.debug('-- awaiting subprocess…')
                 returncode = await proc.wait()
             except asyncio.CancelledError:
-                self.logger.error(f'Cancelled! Terminating {proc}!…')
+                self.logger.warning('Cancelled!')
+                self.logger.warning(f'{proc} is still alive, terminating…')
                 proc.terminate()
                 try:
                     returncode = await proc.wait()
-                    self.logger.debug(f'Cancelled! {proc} terminated.')
+                    self.logger.debug(f'{proc} terminated.')
                 except asyncio.CancelledError:
-                    self.logger.error(f'Cancelled again! Killing {proc}!…')
+                    self.logger.error(f'{proc} is still alive, killing…')
                     proc.kill()
                     returncode = await proc.wait()
-                    self.logger.debug(f'Cancelled! {proc} killed.')
+                    self.logger.debug(f'{proc} killed.')
                 raise
             finally:
                 self.event('awaited worker proc', returncode=returncode)

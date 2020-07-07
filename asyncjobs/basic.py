@@ -107,7 +107,7 @@ class Context:
         try:
             results = dict(zip(job_names, await asyncio.gather(*tasks)))
         except Exception:
-            self.logger.info(f'Cancelled due to failure(s) in {job_names}')
+            self.logger.info('Cancelled due to failed dependency')
             raise asyncio.CancelledError
         self.event('awaited results')
         self.logger.debug(f'Returning {results} from .results()')
@@ -196,7 +196,7 @@ class Scheduler:
 
             async def deps_before_coro(ctx, wrapped_coro=coro):
                 assert ctx.deps is None
-                ctx.logger.debug(f'Awaiting dependencies {deps}…')
+                ctx.logger.debug(f'Awaiting dependencies: {deps}…')
                 ctx.deps = await ctx.results(*deps)
                 return await wrapped_coro(ctx)
 
@@ -235,7 +235,7 @@ class Scheduler:
             # reaped/awaited _before_ we return from here
             for name, task in self.tasks.items():
                 if not task.done():
-                    logger.warning(f'Cancelling {name}...')
+                    logger.info(f'Cancelling {name}...')
                     task.cancel()
             try:
                 await asyncio.wait(self.tasks.values())
