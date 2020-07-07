@@ -336,7 +336,7 @@ async def test_redirected_job_no_decoration(run, verify_output):
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
-        ctx.logger.info('Logging to stderr')
+        ctx.logger.warning('Logging to stderr')
 
     job.name = 'foo'
     await run([job], check_events=False)
@@ -353,7 +353,7 @@ async def test_redirected_job_decorate_without_logger(run, verify_output):
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
-        ctx.logger.info('Logging to stderr')
+        ctx.logger.warning('Logging to stderr')
 
     job.name = 'foo'
     await run([job], check_events=False)
@@ -369,7 +369,7 @@ async def test_redirected_job_decorate_err_with_logger(run, verify_output):
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
-        ctx.logger.info('Logging to stderr')
+        ctx.logger.warning('Logging to stderr')
 
     job.name = 'foo'
     await run([job], check_events=False)
