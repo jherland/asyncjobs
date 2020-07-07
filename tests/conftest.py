@@ -197,7 +197,7 @@ class TExternalWorkJob(TBasicJob):
             'await worker proc', may_cancel=True, argv=self.subproc
         )
         try:
-            ret = await ctx.run_in_subprocess(self.subproc)
+            ret = await ctx.run_in_subprocess(self.subproc, check=True)
             self.xevents.add('awaited worker proc', returncode=0)
         except asyncio.CancelledError:
             self.xevents.add(

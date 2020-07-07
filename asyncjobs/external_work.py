@@ -53,7 +53,7 @@ class Context(basic.Context):
                 raise
 
     async def run_in_subprocess(
-        self, argv, stdin=None, stdout=None, stderr=None, check=True
+        self, argv, stdin=None, stdout=None, stderr=None, check=False
     ):
         """Run a command line in a subprocess and await its exit code."""
         returncode = None
