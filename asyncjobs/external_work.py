@@ -67,40 +67,59 @@ class Context(basic.Context):
                 self.logger.warning(f'<- Exception {e!r} from worker!')
                 raise
 
-    async def run_in_subprocess(
-        self, argv, stdin=None, stdout=None, stderr=None, check=False
-    ):
-        """Run a command line in a subprocess and await its exit code."""
-        returncode = None
+    @contextlib.asynccontextmanager
+    async def subprocess(self, argv, *, check=False, **kwargs):
+        """Run a command line in a subprocess and interact with it.
+
+        This context manager yields the asyncio.subprocess.Process instance
+        into the context, and allows the context to interact with the process.
+        The context should await the completion of the subprocess, as the
+        process (if still alive) will be automatically killed upon exiting the
+        context.
+
+        If check=True (the default is False), and the subprocess exits with a
+        non-zero exit code (this includes the case where we have to kill it),
+        we will raise subprocess.CalledProcessError. Otherwise, a non-zero exit
+        code is not considered exceptional.
+        """
         async with self.reserve_worker():
-            self.logger.debug(f'-> starting {argv} in subprocess…')
+            self.logger.debug(f'-> start {argv} in subprocess…')
             self.event('start work in subprocess', argv=argv)
-            proc = await asyncio.create_subprocess_exec(
-                *argv, stdin=stdin, stdout=stdout, stderr=stderr
-            )
+            proc = await asyncio.create_subprocess_exec(*argv, **kwargs)
             try:
-                self.logger.debug('-- awaiting subprocess…')
-                returncode = await proc.wait()
-            except asyncio.CancelledError:
-                self.logger.warning('Cancelled!')
-                self.logger.warning(f'{proc} is still alive, terminating…')
-                self.event('subprocess terminate', argv=argv, pid=proc.pid)
-                proc.terminate()
-                try:
-                    returncode = await proc.wait()
-                    self.logger.debug(f'{proc} terminated.')
-                except asyncio.CancelledError:
-                    self.logger.error(f'{proc} is still alive, killing…')
-                    self.event('subprocess kill', argv=argv, pid=proc.pid)
-                    proc.kill()
-                    returncode = await proc.wait()
-                    self.logger.debug(f'{proc} killed.')
-                raise
+                self.logger.debug(f'-- enter subprocess context for {argv}…')
+                yield proc
             finally:
-                self.event('finish work in subprocess', returncode=returncode)
-        if check and returncode != 0:
-            raise subprocess.CalledProcessError(returncode, argv)
-        return returncode
+                self.logger.debug(f'-- exit subprocess context for {argv}…')
+                if proc.returncode is None:  # still running
+                    self.logger.warning(f'{proc} is still alive, terminating…')
+                    self.event('subprocess terminate', argv=argv, pid=proc.pid)
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.terminate()
+                    try:
+                        await proc.wait()
+                        self.logger.debug(f'{proc} terminated.')
+                    except asyncio.CancelledError:
+                        self.logger.warning(f'{proc} is still alive, killing…')
+                        self.event('subprocess kill', argv=argv, pid=proc.pid)
+                        with contextlib.suppress(ProcessLookupError):
+                            proc.kill()
+                        await proc.wait()
+                        self.logger.debug(f'{proc} killed.')
+                assert proc.returncode is not None
+                self.event(
+                    'finish work in subprocess', returncode=proc.returncode
+                )
+            if check and proc.returncode != 0:
+                raise subprocess.CalledProcessError(proc.returncode, argv)
+
+    async def run_in_subprocess(self, argv, **kwargs):
+        """Run a command line in a subprocess and await its exit code."""
+        async with self.subprocess(argv, **kwargs) as proc:
+            self.logger.debug('-- awaiting subprocess…')
+            await proc.wait()
+            self.logger.debug('-- awaited subprocess…')
+            return proc.returncode
 
 
 class Scheduler(basic.Scheduler):

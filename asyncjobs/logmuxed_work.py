@@ -83,7 +83,8 @@ class Context(external_work.Context):
                     self.stdout = None
                     self.stderr = None
 
-    async def run_in_subprocess(self, argv, **kwargs):
+    @contextlib.asynccontextmanager
+    async def subprocess(self, argv, **kwargs):
         """Pass redirected out/err as stdout/stderr to the subprocess.
 
         Only if stdout/stderr is not already customized by the caller.
@@ -92,7 +93,8 @@ class Context(external_work.Context):
             kwargs['stdout'] = self.stdout
         if kwargs.get('stderr') is None:
             kwargs['stderr'] = self.stderr
-        return await super().run_in_subprocess(argv, **kwargs)
+        async with super().subprocess(argv, **kwargs) as proc:
+            yield proc
 
 
 class Scheduler(external_work.Scheduler):
