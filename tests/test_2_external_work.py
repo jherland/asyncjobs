@@ -32,21 +32,13 @@ def run(Scheduler):
     return _run
 
 
-# simple scenarios with threads/subprocesses
+# simple thread scenarios with call_in_thread() helper
 
 
 async def test_one_ok_job_in_thread(run):
     todo = [TJob('foo', thread=lambda ctx: 'foo worked')]
     done = await run(todo)
     assert verify_tasks(done, {'foo': 'foo worked'})
-
-
-async def test_one_ok_job_in_subproc(run, tmp_path):
-    path = tmp_path / 'foo'
-    todo = [TJob('foo', subproc=['touch', str(path)])]
-    done = await run(todo)
-    assert verify_tasks(done, {'foo': 0})
-    assert path.is_file()
 
 
 async def test_one_failed_between_two_ok_jobs_in_threads_cancels_last(run):
@@ -62,6 +54,17 @@ async def test_one_failed_between_two_ok_jobs_in_threads_cancels_last(run):
     assert verify_tasks(
         done, {'foo': 'foo worked', 'bar': ValueError('UGH'), 'baz': Cancelled}
     )
+
+
+# simple subprocess scenarios with run_in_subprocess() helper
+
+
+async def test_one_ok_job_in_subproc(run, tmp_path):
+    path = tmp_path / 'foo'
+    todo = [TJob('foo', subproc=['touch', str(path)])]
+    done = await run(todo)
+    assert verify_tasks(done, {'foo': 0})
+    assert path.is_file()
 
 
 async def test_one_failed_between_two_in_subprocs_cancels_last(run, tmp_path):

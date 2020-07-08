@@ -170,57 +170,112 @@ class TExternalWorkJob(TBasicJob):
         else:
             self.subproc = subproc
 
-    async def _do_thread_stuff(self, ctx):
-        ctx.logger.debug(f'Await call {self.thread} in thread…')
+    @contextmanager
+    def thread_xevents(self):
         self.xevents.add('await worker slot')
         self.xevents.add('awaited worker slot', may_cancel=True)
         self.xevents.add(
-            'start work in thread', may_cancel=True, func=Whatever
+            'start work in thread', func=Whatever, may_cancel=True
         )
         try:
-            ret = await ctx.call_in_thread(self.thread, ctx)
+            yield
             self.xevents.add('finish work in thread', fate='success')
         except asyncio.CancelledError:
             self.xevents.add(
-                'finish work in thread', may_cancel=True, fate='cancelled',
+                'finish work in thread', fate='cancelled', may_cancel=True
             )
+            raise
+        except Exception:
+            self.xevents.add('finish work in thread', fate='failed')
+            raise
+
+    async def do_thread_stuff(self, ctx):
+        ctx.logger.debug(f'Start call to {self.thread} in thread…')
+        try:
+            if asyncio.iscoroutinefunction(self.thread):
+                ret = await self.thread(self, ctx)
+            else:
+                with self.thread_xevents():
+                    ret = await ctx.call_in_thread(self.thread, ctx)
+        except asyncio.CancelledError:
             raise
         except Exception as e:
             ret = e
-            self.xevents.add('finish work in thread', fate='failed')
         ctx.logger.debug(f'Finished thread call: {ret!r}')
         return ret
 
-    async def _do_subproc_stuff(self, ctx):
-        ctx.logger.debug(f'Await run {self.subproc} in subprocess…')
+    @contextmanager
+    def subprocess_xevents(self, argv, result=None, may_cancel=False):
         self.xevents.add('await worker slot')
-        self.xevents.add('awaited worker slot', may_cancel=True)
+        self.xevents.add('awaited worker slot', may_cancel=may_cancel)
         self.xevents.add(
-            'start work in subprocess', may_cancel=True, argv=self.subproc
+            'start work in subprocess', argv=argv, may_cancel=may_cancel
         )
+
         try:
-            ret = await ctx.run_in_subprocess(self.subproc, check=True)
-            self.xevents.add('finish work in subprocess', returncode=0)
+            yield
+            if result is None:  # Normal return: assume exit code 0
+                self.xevents.add('finish work in subprocess', returncode=0)
         except asyncio.CancelledError:
-            self.xevents.add(
-                'finish work in subprocess', may_cancel=True, returncode=-15
-            )
+            if result is None:  # Assume cancellation was expected
+                self.xevents.add(
+                    'finish work in subprocess',
+                    returncode=-15,
+                    may_cancel=may_cancel,
+                )
             raise
         except Exception as e:
-            ret = e
-            if isinstance(e, CalledProcessError):
+            if result is None and isinstance(e, CalledProcessError):
                 self.xevents.add(
                     'finish work in subprocess', returncode=e.returncode
                 )
+            raise
+        finally:
+            if result == 'terminate' or result == 'kill':
+                self.xevents.add(
+                    'subprocess terminate',
+                    argv=argv,
+                    pid=Whatever,
+                    may_cancel=may_cancel,
+                )
+                if result == 'kill':
+                    self.xevents.add(
+                        'subprocess kill',
+                        argv=argv,
+                        pid=Whatever,
+                        may_cancel=may_cancel,
+                    )
+                    result = -9
+                else:
+                    result = -15
+            if result is not None and result != 'abort':
+                self.xevents.add(
+                    'finish work in subprocess',
+                    returncode=result,
+                    may_cancel=may_cancel,
+                )
+
+    async def do_subproc_stuff(self, ctx):
+        ctx.logger.debug(f'Start running {self.subproc}…')
+        try:
+            if asyncio.iscoroutinefunction(self.subproc):
+                ret = await self.subproc(self, ctx)
+            else:
+                with self.subprocess_xevents(self.subproc, may_cancel=True):
+                    ret = await ctx.run_in_subprocess(self.subproc, check=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            ret = e
         ctx.logger.debug(f'Finished subprocess run: {ret}')
         return ret
 
     async def do_work(self, ctx):
         result = await super().do_work(ctx)
         if self.thread:
-            result = await self._do_thread_stuff(ctx)
+            result = await self.do_thread_stuff(ctx)
         if self.subproc:
-            result = await self._do_subproc_stuff(ctx)
+            result = await self.do_subproc_stuff(ctx)
         return result
 
 
