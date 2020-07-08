@@ -219,6 +219,12 @@ class TExternalWorkJob(TBasicJob):
         except asyncio.CancelledError:
             if result is None:  # Assume cancellation was expected
                 self.xevents.add(
+                    'subprocess terminate',
+                    argv=argv,
+                    pid=Whatever,
+                    may_cancel=may_cancel,
+                )
+                self.xevents.add(
                     'finish work in subprocess',
                     returncode=-15,
                     may_cancel=may_cancel,

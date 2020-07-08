@@ -69,12 +69,14 @@ class Context(basic.Context):
             except asyncio.CancelledError:
                 self.logger.warning('Cancelled!')
                 self.logger.warning(f'{proc} is still alive, terminating…')
+                self.event('subprocess terminate', argv=argv, pid=proc.pid)
                 proc.terminate()
                 try:
                     returncode = await proc.wait()
                     self.logger.debug(f'{proc} terminated.')
                 except asyncio.CancelledError:
                     self.logger.error(f'{proc} is still alive, killing…')
+                    self.event('subprocess kill', argv=argv, pid=proc.pid)
                     proc.kill()
                     returncode = await proc.wait()
                     self.logger.debug(f'{proc} killed.')
