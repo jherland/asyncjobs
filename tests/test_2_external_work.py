@@ -5,6 +5,7 @@ from asyncjobs import external_work
 
 from conftest import (
     Cancelled,
+    mock_argv,
     TExternalWorkJob,
     verified_events,
     verify_tasks,
@@ -61,7 +62,7 @@ async def test_one_failed_between_two_ok_jobs_in_threads_cancels_last(run):
 
 async def test_one_ok_job_in_subproc(run, tmp_path):
     path = tmp_path / 'foo'
-    todo = [TJob('foo', subproc=['touch', str(path)])]
+    todo = [TJob('foo', subproc=mock_argv(f'touch:{path}'))]
     done = await run(todo)
     assert verify_tasks(done, {'foo': 0})
     assert path.is_file()
@@ -71,14 +72,18 @@ async def test_one_failed_between_two_in_subprocs_cancels_last(run, tmp_path):
     foo_path = tmp_path / 'foo'
     baz_path = tmp_path / 'baz'
     todo = [
-        TJob('foo', before={'bar'}, subproc=['touch', str(foo_path)]),
-        TJob('bar', {'foo'}, before={'baz'}, subproc=['false']),
-        TJob('baz', {'bar'}, subproc=['touch', str(baz_path)]),
+        TJob('foo', before={'bar'}, subproc=mock_argv(f'touch:{foo_path}')),
+        TJob('bar', {'foo'}, before={'baz'}, subproc=mock_argv('exit:1')),
+        TJob('baz', {'bar'}, subproc=mock_argv(f'touch:{baz_path}')),
     ]
     done = await run(todo)
     assert verify_tasks(
         done,
-        {'foo': 0, 'bar': CalledProcessError(1, ['false']), 'baz': Cancelled},
+        {
+            'foo': 0,
+            'bar': CalledProcessError(1, mock_argv('exit:1')),
+            'baz': Cancelled,
+        },
     )
     assert foo_path.is_file()
     assert not baz_path.exists()

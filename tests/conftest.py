@@ -4,6 +4,7 @@ from functools import partial
 import itertools
 import logging
 import os
+from pathlib import Path
 import pytest
 import signal
 from subprocess import CalledProcessError
@@ -300,6 +301,11 @@ def scheduler_with_workers(num_workers):
         return partial(_Scheduler, workers=num_workers)
 
     return make_scheduler_class
+
+
+def mock_argv(*args):
+    mock_path = Path(__file__).parent / 'subprocess_helper.py'
+    return [str(mock_path)] + list(args)
 
 
 @contextmanager
