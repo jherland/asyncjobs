@@ -1,5 +1,7 @@
+import asyncio
 import pytest
 from subprocess import CalledProcessError
+import time
 
 from asyncjobs import external_work
 
@@ -9,6 +11,7 @@ from conftest import (
     TExternalWorkJob,
     verified_events,
     verify_tasks,
+    Whatever,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -87,6 +90,58 @@ async def test_one_failed_between_two_in_subprocs_cancels_last(run, tmp_path):
     )
     assert foo_path.is_file()
     assert not baz_path.exists()
+
+
+# multiple threads/subprocesses from a single job
+
+
+async def test_two_threads_concurrently(run, num_workers):
+    def thread_func(ret):
+        time.sleep(0.1)
+        return ret
+
+    async def coro(tjob, ctx):
+        return await asyncio.gather(
+            ctx.call_in_thread(thread_func, 'FOO'),
+            ctx.call_in_thread(thread_func, 'BAR'),
+        )
+
+    job = TJob('foo', thread=coro)
+    if num_workers < 2:  # Cannot allocate second worker
+        job.xevents.add('await worker slot')
+        job.xevents.add('awaited worker slot')
+        job.xevents.add('start work in thread', func=Whatever)
+        expect_result = RuntimeError(
+            f'Cannot allocate >={num_workers} worker(s) from job foo!'
+        )
+    else:
+        with job.thread_xevents():
+            with job.thread_xevents():
+                expect_result = ['FOO', 'BAR']
+    done = await run([job])
+    assert verify_tasks(done, {'foo': expect_result})
+
+
+async def test_two_subprocesses_concurrently(run, num_workers):
+    argv = mock_argv()
+
+    async def coro(tjob, ctx):
+        return await asyncio.gather(
+            ctx.run_in_subprocess(argv), ctx.run_in_subprocess(argv),
+        )
+
+    job = TJob('foo', subproc=coro)
+    if num_workers < 2:  # Cannot allocate second worker
+        with job.subprocess_xevents(argv, result='abort'):
+            expect_result = RuntimeError(
+                f'Cannot allocate >={num_workers} worker(s) from job foo!'
+            )
+    else:
+        with job.subprocess_xevents(argv, result=0):
+            with job.subprocess_xevents(argv, result=0):
+                expect_result = [0, 0]
+    done = await run([job])
+    assert verify_tasks(done, {'foo': expect_result})
 
 
 # add_thread_job() helper

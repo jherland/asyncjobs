@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 class Context(basic.Context):
     """Extend Context with helpers for doing work in threads + processes."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._workers_in_use = 0
+
     @contextlib.asynccontextmanager
     async def reserve_worker(self):
         """Acquire a worker context where this job can run its own work.
@@ -20,7 +24,17 @@ class Context(basic.Context):
         work than allowed by Scheduler.workers. Anybody that wants to spin off
         another thread or process to perform some work should use this context
         manager to await a free "slot".
+
+        If a single job tries to reserve more concurrent workers than allowed
+        by Scheduler.workers, a RuntimeError will be raised.
         """
+        if self._workers_in_use >= self._scheduler.workers:
+            raise RuntimeError(
+                'Cannot allocate >={} worker(s) from job {}!'.format(
+                    self._scheduler.workers, self.name
+                )
+            )
+        self._workers_in_use += 1
         self.logger.debug('-> acquiring worker semaphore…')
         self.event('await worker slot')
         async with self._scheduler.worker_semaphore:
@@ -30,6 +44,7 @@ class Context(basic.Context):
                 yield
             finally:
                 self.logger.debug('<- releasing worker semaphore')
+                self._workers_in_use -= 1
 
     async def call_in_thread(self, func, *args):
         """Call func(*args) in a worker thread and await its result."""
