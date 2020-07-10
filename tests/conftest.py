@@ -322,10 +322,11 @@ Cancelled = object()
 
 def verify_tasks(tasks, expects):
     errors = 0
+    NotGiven = object()
 
-    def fail(job_name, expect, actual=None):
+    def fail(job_name, expect, actual=NotGiven):
         nonlocal errors
-        if actual is None:
+        if actual is NotGiven:
             logger.error(f'{job_name}: {expect}')
         else:
             logger.error(f'{job_name}: expected {expect!r}, actual {actual!r}')
