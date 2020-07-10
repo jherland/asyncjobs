@@ -8,6 +8,7 @@ import time
 from asyncjobs import external_work
 
 from conftest import (
+    assert_elapsed_time,
     Cancelled,
     mock_argv,
     TExternalWorkJob,
@@ -236,6 +237,58 @@ async def test_subprocess_with_custom_env(run):
     todo = [TJob('foo', subproc=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': b'BAZZLE\n'})
+
+
+# proper termination/killing on subprocess misbehavior
+
+
+async def test_not_awaiting_subprocess_terminates_it(run):
+    argv = mock_argv('FOO', 'sleep:5')
+
+    async def coro(tjob, ctx):
+        with tjob.subprocess_xevents(argv, result='terminate'):
+            async with ctx.subprocess(argv, stdout=PIPE) as proc:
+                output = await proc.stdout.readline()
+                # MISSING await proc.wait() here to trigger termination
+        return output
+
+    todo = [TJob('foo', subproc=coro)]
+    done = await run(todo)
+    assert verify_tasks(done, {'foo': b'FOO\n'})
+
+
+async def test_partial_read_from_subprocess_before_terminating_it(run):
+    argv = mock_argv('FOO', 'BAR', 'sleep:5', 'BAZ')
+
+    async def coro(tjob, ctx):
+        with tjob.subprocess_xevents(argv, result='terminate'):
+            async with ctx.subprocess(argv, stdout=PIPE) as proc:
+                output = await proc.stdout.readline()
+                output += await proc.stdout.readline()
+                # MISSING await proc.wait() here to trigger termination
+        return output
+
+    todo = [TJob('foo', subproc=coro)]
+    done = await run(todo)
+    assert verify_tasks(done, {'foo': b'FOO\nBAR\n'})
+
+
+async def test_non_terminating_subprocess_is_killed(run):
+    argv = mock_argv('ignore:SIGTERM', 'FOO', 'sleep:5')
+
+    async def coro(tjob, ctx):
+        with tjob.subprocess_xevents(argv, result='kill'):
+            async with ctx.subprocess(
+                argv, stdout=PIPE, kill_delay=0.1
+            ) as proc:
+                output = await proc.stdout.readline()
+                # MISSING await proc.wait() here to trigger termination
+        return output
+
+    todo = [TJob('foo', subproc=coro)]
+    with assert_elapsed_time(lambda t: t < 0.5):
+        done = await run(todo)
+    assert verify_tasks(done, {'foo': b'FOO\n'})
 
 
 # multiple threads/subprocesses from a single job

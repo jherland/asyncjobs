@@ -67,8 +67,31 @@ class Context(basic.Context):
                 self.logger.warning(f'<- Exception {e!r} from worker!')
                 raise
 
+    async def terminate_subprocess(self, proc, argv, delay, *, kill=False):
+        if proc.returncode is not None:  # process has already exited
+            return
+
+        verb = 'kill' if kill else 'terminate'
+        self.logger.warning(f'{proc} is still alive, {verb}…')
+        self.event(f'subprocess {verb}', argv=argv, pid=proc.pid)
+        with contextlib.suppress(ProcessLookupError):
+            if kill:
+                proc.kill()
+            else:
+                proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), delay)
+            self.logger.debug(f'{proc} {verb} done.')
+        except asyncio.TimeoutError as e:
+            # Reinstate the previous exception/return that caused this
+            if e.__context__ is not None:
+                raise e.__context__
+        finally:
+            if proc.returncode is None:  # still running
+                await self.terminate_subprocess(proc, argv, delay, kill=True)
+
     @contextlib.asynccontextmanager
-    async def subprocess(self, argv, *, check=False, **kwargs):
+    async def subprocess(self, argv, *, check=False, kill_delay=3, **kwargs):
         """Run a command line in a subprocess and interact with it.
 
         This context manager yields the asyncio.subprocess.Process instance
@@ -76,6 +99,10 @@ class Context(basic.Context):
         The context should await the completion of the subprocess, as the
         process (if still alive) will be automatically killed upon exiting the
         context.
+
+        Killing the subprocess is done by sending SIGTERM to it, and if it's
+        still alive 3 seconds later, send SIGKILL as well. The delay between
+        these signals can be customized with the 'kill_delay' argument.
 
         If check=True (the default is False), and the subprocess exits with a
         non-zero exit code (this includes the case where we have to kill it),
@@ -91,25 +118,14 @@ class Context(basic.Context):
                 yield proc
             finally:
                 self.logger.debug(f'-- exit subprocess context for {argv}…')
-                if proc.returncode is None:  # still running
-                    self.logger.warning(f'{proc} is still alive, terminating…')
-                    self.event('subprocess terminate', argv=argv, pid=proc.pid)
-                    with contextlib.suppress(ProcessLookupError):
-                        proc.terminate()
-                    try:
-                        await proc.wait()
-                        self.logger.debug(f'{proc} terminated.')
-                    except asyncio.CancelledError:
-                        self.logger.warning(f'{proc} is still alive, killing…')
-                        self.event('subprocess kill', argv=argv, pid=proc.pid)
-                        with contextlib.suppress(ProcessLookupError):
-                            proc.kill()
-                        await proc.wait()
-                        self.logger.debug(f'{proc} killed.')
-                assert proc.returncode is not None
-                self.event(
-                    'finish work in subprocess', returncode=proc.returncode
-                )
+                try:
+                    if proc.returncode is None:  # still running
+                        await self.terminate_subprocess(proc, argv, kill_delay)
+                finally:
+                    assert proc.returncode is not None
+                    self.event(
+                        'finish work in subprocess', returncode=proc.returncode
+                    )
             if check and proc.returncode != 0:
                 raise subprocess.CalledProcessError(proc.returncode, argv)
 
