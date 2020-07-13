@@ -51,14 +51,18 @@ def abort_in(when=None, assert_on_escape=True):
 
 
 @contextmanager
-def assert_elapsed_time_within(time_limit):
-    """Measure time used in context and fail test if not within given limit."""
+def assert_elapsed_time(predicate):
+    """Measure time used in context and assert that predicate holds.
+
+    Calculate elapsed time in context, and assert predicate(elapsed).
+    """
     before = time.time()
     try:
         yield
     finally:
         after = time.time()
-        assert after < before + time_limit
+        logger.debug(f'Passing {after - before} to predicate {predicate}')
+        assert predicate(after - before)
 
 
 class TBasicJob:

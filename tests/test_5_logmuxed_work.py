@@ -10,7 +10,7 @@ from asyncjobs import logmuxed_work, signal_handling
 
 from conftest import (
     abort_in,
-    assert_elapsed_time_within,
+    assert_elapsed_time,
     TExternalWorkJob,
     verified_events,
 )
@@ -317,7 +317,7 @@ async def test_decorated_output_from_aborted_processes(
         )
         for name in jobs
     ]
-    with assert_elapsed_time_within(0.75):
+    with assert_elapsed_time(lambda t: t < 0.75):
         await run(todo, abort_after=0.5)
 
     # We have 3 jobs, but can only run as many concurrently as there are
