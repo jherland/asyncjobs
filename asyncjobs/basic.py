@@ -210,37 +210,46 @@ class Scheduler:
     async def _run_tasks(self, return_when):
         logger.info('Waiting for all jobs to complete…')
         self.event('await tasks', jobs=list(self.tasks.keys()))
-        try:
-            while True:
+        shutting_down = False
+        while any(not t.done() for t in self.tasks.values()):
+            # NEVER exit this loop while there are tasks still running.
+            try:
                 # Await the tasks that are currently running. More tasks may be
                 # spawned while we're waiting, and those are not awaited here.
                 await asyncio.wait(
                     self.tasks.values(), return_when=return_when
                 )
                 # We know _some_ task completed, successfully or not
-                if return_when == concurrent.futures.FIRST_COMPLETED:
-                    break
-                elif return_when == concurrent.futures.FIRST_EXCEPTION:
-                    # Figure out if there are failed tasks and we should return
-                    if any(
-                        t.done() and (t.cancelled() or t.exception())
-                        for t in self.tasks.values()
-                    ):
-                        break
-                # Otherwise return when all tasks are done
-                if all(t.done() for t in self.tasks.values()):
-                    break
-        finally:
-            # Any tasks left running at this point should be cancelled and
-            # reaped/awaited _before_ we return from here
-            for name, task in self.tasks.items():
-                if not task.done():
-                    logger.info(f'Cancelling {name}...')
-                    task.cancel()
-            try:
-                await asyncio.wait(self.tasks.values())
+                assert any(t.done() for t in self.tasks.values())
+
+                if not shutting_down:
+                    # It is time to shut down, yet?
+                    if return_when == concurrent.futures.FIRST_COMPLETED:
+                        shutting_down = True
+                    elif return_when == concurrent.futures.FIRST_EXCEPTION:
+                        shutting_down = any(
+                            t.done() and (t.cancelled() or t.exception())
+                            for t in self.tasks.values()
+                        )
+                    else:
+                        assert return_when == concurrent.futures.ALL_COMPLETED
+                        shutting_down = all(
+                            t.done() for t in self.tasks.values()
+                        )
+            except BaseException as e:
+                logger.warning(f'{self.__class__.__name__} aborted by {e!r}')
+                shutting_down = True
             finally:
-                self.event('awaited tasks')
+                if shutting_down:
+                    # Keep cancelling tasks until all are finished
+                    logger.info('Shutting down…')
+                    self.event('cancelling tasks')
+                    return_when = concurrent.futures.ALL_COMPLETED
+                    for name, task in self.tasks.items():
+                        if not task.done():
+                            logger.info(f'Cancelling {name}…')
+                            task.cancel()
+        self.event('awaited tasks')
 
     async def run(self, *, keep_going=False):
         """Run until all jobs are finished.

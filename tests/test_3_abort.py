@@ -53,9 +53,9 @@ async def test_abort_one_job_returns_immediately(run):
     assert verify_tasks(done, {'foo': Cancelled})
 
 
-async def test_abort_one_job_in_thread_returns_immediately(run):
-    todo = [TJob('foo', thread_sleep=0.3)]
-    with assert_elapsed_time(lambda t: t < 0.2):
+async def test_abort_one_job_in_thread_cannot_return_immediately(run):
+    todo = [TJob('foo', thread_sleep=0.2)]
+    with assert_elapsed_time(lambda t: t > 0.2):  # must wait for thread
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {'foo': Cancelled})
 
@@ -83,9 +83,9 @@ async def test_abort_hundred_jobs_returns_immediately(run):
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
 
 
-async def test_abort_hundred_jobs_in_threads_returns_immediately(run):
-    todo = [TJob(f'foo #{i}', thread_sleep=1.0) for i in range(100)]
-    with assert_elapsed_time(lambda t: t < 0.5):
+async def test_abort_hundred_jobs_in_threads_cannot_return_immediately(run):
+    todo = [TJob(f'foo #{i}', thread_sleep=0.3) for i in range(100)]
+    with assert_elapsed_time(lambda t: t > 0.3):  # must wait for all threads
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
 

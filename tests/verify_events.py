@@ -155,6 +155,8 @@ class EventVerifier:
             # (we cannot deterministically sequence events between jobs)
             while self.events:
                 actual = self.events.pop(0)
+                if actual['event'] == 'cancelling tasks':
+                    continue
                 xjobs[actual['job']].verify_next(actual)
 
             # No more expected events
