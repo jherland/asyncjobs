@@ -3,6 +3,7 @@ import contextlib
 import functools
 import pytest
 import random
+from subprocess import PIPE
 import time
 
 from asyncjobs import logmuxed_work, signal_handling
@@ -13,6 +14,7 @@ from conftest import (
     mock_argv,
     TExternalWorkJob,
     verified_events,
+    verify_tasks,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -143,13 +145,14 @@ def run(Scheduler):
     return _run
 
 
-def mock_out_err_argv(out, err, sleep=0, **kwargs):
+def mock_out_err_argv(out, err, sleep=0, exit=0, **kwargs):
     return mock_argv(
         'out:',
         out.format(**kwargs),
         f'sleep:{sleep}',
         'err:',
         err.format(**kwargs),
+        f'exit:{exit}',
     )
 
 
@@ -276,6 +279,9 @@ async def test_decorated_output_from_thread_worker(run, verify_output):
     )
 
 
+# decorated output from subprocesses
+
+
 async def test_decorated_output_from_subprocess_worker(run, verify_output):
     jobs = ['foo', 'bar']
     out = "This is {name}'s stdout"
@@ -323,6 +329,85 @@ async def test_decorated_output_from_aborted_processes(
     outprefix = '{name}/out: '
     expect_out = [[(outprefix + out).format(name=name)] for name in jobs]
     assert verify_output(expect_out[:num_workers], [])
+
+
+async def test_decorated_output_from_subprocess_context(run, verify_output):
+    jobs = ['foo', 'bar']
+    out = "This is {name}'s stdout"
+    err = "This is {name}'s stderr"
+
+    async def coro(tjob, ctx):
+        argv = mock_out_err_argv(out, err, name=tjob.name)
+        with tjob.subprocess_xevents(argv, result=0):
+            async with ctx.subprocess(argv) as proc:
+                await proc.wait()
+
+    todo = [TJob(name, decorate=True, subproc=coro) for name in jobs]
+    await run(todo)
+
+    outprefix = '{name}/out: '
+    errprefix = '{name}/ERR: '
+    assert verify_output(
+        [[(outprefix + out).format(name=name)] for name in jobs],
+        [[(errprefix + err).format(name=name)] for name in jobs],
+    )
+
+
+async def test_subproc_decorate_stderr_capture_stdout(run, verify_output):
+    jobs = ['foo', 'bar']
+    out = "This is {name}'s stdout"
+    err = "This is {name}'s stderr"
+
+    async def coro(tjob, ctx):
+        argv = mock_out_err_argv(out, err, name=tjob.name)
+        with tjob.subprocess_xevents(argv):
+            async with ctx.subprocess(argv, stdout=PIPE) as proc:
+                output = await proc.stdout.read()
+                await proc.wait()
+                return output
+
+    todo = [TJob(name, decorate=True, subproc=coro) for name in jobs]
+    done = await run(todo)
+
+    assert verify_tasks(
+        done,
+        {
+            name: (out + '\n').format(name=name).encode('utf-8')
+            for name in jobs
+        },
+    )
+    assert verify_output(
+        [[] for name in jobs],
+        [[('{name}/ERR: ' + err).format(name=name)] for name in jobs],
+    )
+
+
+async def test_subproc_capture_stdout_from_terminated_proc(run, verify_output):
+    jobs = ['foo', 'bar']
+    out = "This is {name}'s stdout"
+    err = "This is {name}'s stderr"
+
+    async def coro(tjob, ctx):
+        argv = mock_out_err_argv(out, err, sleep=30, name=tjob.name)
+        with tjob.subprocess_xevents(argv, result='terminate'):
+            async with ctx.subprocess(argv, stdout=PIPE) as proc:
+                return await proc.stdout.readline()
+                # Skipping await proc.wait() to provoke termination
+
+    todo = [TJob(name, decorate=True, subproc=coro) for name in jobs]
+    done = await run(todo)
+
+    assert verify_tasks(
+        done,
+        {
+            name: (out + '\n').format(name=name).encode('utf-8')
+            for name in jobs
+        },
+    )
+    assert verify_output(
+        [[] for name in jobs],
+        [[] for name in jobs],  # subproc terminated before printing to stderr
+    )
 
 
 # redirected_job() decorator
@@ -374,6 +459,39 @@ async def test_redirected_job_decorate_err_with_logger(run, verify_output):
         [['Printing to stdout']],
         [['foo/ERR: Printing to stderr', 'foo/ERR: Logging to stderr']],
     )
+
+
+async def test_redirected_job_with_decorated_subproc(run, verify_output):
+    dec_out, dec_err = decorators('foo')
+    argv = mock_out_err_argv('Printing to stdout', 'Printing to stderr')
+
+    @logmuxed_work.redirected_job(dec_out, dec_err, False)
+    async def job(ctx):
+        async with ctx.subprocess(argv) as proc:
+            await proc.wait()
+
+    job.name = 'foo'
+    await run([job], check_events=False)
+    assert verify_output(
+        [['foo/out: Printing to stdout']], [['foo/ERR: Printing to stderr']],
+    )
+
+
+async def test_redirected_job_with_subproc_output_capture(run, verify_output):
+    dec_out, dec_err = decorators('foo')
+    argv = mock_out_err_argv('Printing to stdout', 'Printing to stderr')
+
+    @logmuxed_work.redirected_job(dec_out, dec_err, False)
+    async def job(ctx):
+        async with ctx.subprocess(argv, stdout=PIPE) as proc:
+            output = await proc.stdout.read()
+            await proc.wait()
+            return output
+
+    job.name = 'foo'
+    done = await run([job], check_events=False)
+    assert verify_tasks(done, {'foo': b'Printing to stdout\n'})
+    assert verify_output([[]], [['foo/ERR: Printing to stderr']],)
 
 
 # stress-testing the logmux framework
