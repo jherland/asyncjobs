@@ -1,7 +1,6 @@
 import asyncio
 import contextlib
 import functools
-from pathlib import Path
 import pytest
 import random
 import time
@@ -11,13 +10,12 @@ from asyncjobs import logmuxed_work, signal_handling
 from conftest import (
     abort_in,
     assert_elapsed_time,
+    mock_argv,
     TExternalWorkJob,
     verified_events,
 )
 
 pytestmark = pytest.mark.asyncio
-
-sh_helper = Path(__file__).parent / 'test_5_logmuxed_work_helper.sh'
 
 
 def shuffled_prints(out_f, err_f, out_str, err_str):
@@ -145,6 +143,16 @@ def run(Scheduler):
     return _run
 
 
+def mock_out_err_argv(out, err, sleep=0, **kwargs):
+    return mock_argv(
+        'out:',
+        out.format(**kwargs),
+        f'sleep:{sleep}',
+        'err:',
+        err.format(**kwargs),
+    )
+
+
 # no output
 
 
@@ -269,7 +277,6 @@ async def test_decorated_output_from_thread_worker(run, verify_output):
 
 
 async def test_decorated_output_from_subprocess_worker(run, verify_output):
-    assert sh_helper.is_file()
     jobs = ['foo', 'bar']
     out = "This is {name}'s stdout"
     err = "This is {name}'s stderr"
@@ -278,11 +285,7 @@ async def test_decorated_output_from_subprocess_worker(run, verify_output):
         TJob(
             name,
             decorate=True,
-            subproc=[
-                str(sh_helper),
-                out.format(name=name),
-                err.format(name=name),
-            ],
+            subproc=mock_out_err_argv(out, err, name=name),
         )
         for name in jobs
     ]
@@ -299,7 +302,6 @@ async def test_decorated_output_from_subprocess_worker(run, verify_output):
 async def test_decorated_output_from_aborted_processes(
     num_workers, run, verify_output
 ):
-    assert sh_helper.is_file()
     jobs = ['foo', 'bar', 'baz']
     out = "This is {name}'s stdout"
     err = "This is {name}'s stderr"
@@ -308,12 +310,7 @@ async def test_decorated_output_from_aborted_processes(
         TJob(
             name,
             decorate=True,
-            subproc=[
-                str(sh_helper),
-                out.format(name=name),
-                err.format(name=name),
-                '1',  # sleep 1 sec between stdout print and stderr print
-            ],
+            subproc=mock_out_err_argv(out, err, sleep=1, name=name),
         )
         for name in jobs
     ]
@@ -456,7 +453,6 @@ async def test_decorated_output_from_100_thread_workers(run, verify_output):
 
 
 async def test_decorated_output_from_100_subprocesses(run, verify_output):
-    assert sh_helper.is_file()
     out = "This is {i}'s stdout"
     err = "This is {i}'s stderr"
 
@@ -464,7 +460,7 @@ async def test_decorated_output_from_100_subprocesses(run, verify_output):
         TJob(
             f'job #{i}',
             decorate=True,
-            subproc=[str(sh_helper), out.format(i=i), err.format(i=i)],
+            subproc=mock_out_err_argv(out, err, i=i),
         )
         for i in range(100)
     ]
