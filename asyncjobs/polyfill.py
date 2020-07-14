@@ -31,32 +31,86 @@ if not hasattr(asyncio.Task, 'get_name'):
     setattr(asyncio, 'create_task', create_task)
 
 
-# asyncio.current_task() added in Python v3.7
-if not hasattr(asyncio, 'current_task'):
-
-    def current_task():
-        return asyncio.Task.current_task()
-
-    setattr(asyncio, 'current_task', current_task)
-
-
 # asyncio.get_running_loop() added in Python v3.7
 if not hasattr(asyncio, 'get_running_loop'):
+    # The following was pilfered from Python v3.8's asyncio.events:
+    # https://github.com/python/cpython/blob/3.8/Lib/asyncio/events.py
 
     def get_running_loop():
-        return asyncio.get_event_loop()
+        loop = asyncio.events._get_running_loop()
+        if loop is None:
+            raise RuntimeError('no running event loop')
+        return loop
 
     setattr(asyncio, 'get_running_loop', get_running_loop)
 
 
+# asyncio.current_task() added in Python v3.7
+if not hasattr(asyncio, 'current_task'):
+    # The following was pilfered from Python v3.8's asyncio.tasks:
+    # https://github.com/python/cpython/blob/3.8/Lib/asyncio/tasks.py
+
+    def current_task(loop=None):
+        if loop is None:
+            loop = asyncio.get_running_loop()
+        return asyncio.Task.current_task(loop)
+
+    setattr(asyncio, 'current_task', current_task)
+
+
 # asyncio.run() added in Python v3.7
 if not hasattr(asyncio, 'run'):
+    # The following was pilfered from Python v3.8's asyncio.runners:
+    # https://github.com/python/cpython/blob/3.8/Lib/asyncio/runners.py
+
+    def _cancel_all_tasks(loop):
+        to_cancel = asyncio.Task.all_tasks(loop)
+        if not to_cancel:
+            return
+
+        for task in to_cancel:
+            task.cancel()
+
+        loop.run_until_complete(
+            asyncio.tasks.gather(*to_cancel, loop=loop, return_exceptions=True)
+        )
+
+        for task in to_cancel:
+            if task.cancelled():
+                continue
+            if task.exception() is not None:
+                message = 'unhandled exception during asyncio.run() shutdown'
+                loop.call_exception_handler(
+                    {
+                        'message': message,
+                        'exception': task.exception(),
+                        'task': task,
+                    }
+                )
 
     def run(main, *, debug=False):
-        loop = asyncio.get_event_loop()
-        ret = loop.run_until_complete(main)
-        loop.close()
-        return ret
+        if asyncio.events._get_running_loop() is not None:
+            raise RuntimeError(
+                "asyncio.run() cannot be called from a running event loop"
+            )
+
+        if not asyncio.coroutines.iscoroutine(main):
+            raise ValueError("a coroutine was expected, got {!r}".format(main))
+
+        loop = asyncio.events.new_event_loop()
+        # We want all tasks created/returned to have name support (see above)
+        loop.set_task_factory(lambda loop, coro: asyncio.Task(coro, loop=loop))
+        try:
+            asyncio.events.set_event_loop(loop)
+            loop.set_debug(debug)
+            return loop.run_until_complete(main)
+        finally:
+            try:
+                _cancel_all_tasks(loop)
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            finally:
+                asyncio.events.set_event_loop(None)
+                loop.close()
 
     setattr(asyncio, 'run', run)
 
