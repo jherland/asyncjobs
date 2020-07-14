@@ -4,9 +4,10 @@ import functools
 import pytest
 import random
 from subprocess import PIPE
+import sys
 import time
 
-from asyncjobs import logmuxed_work, signal_handling
+from asyncjobs import logmux, logmuxed_work, signal_handling
 
 from conftest import (
     abort_in,
@@ -130,8 +131,8 @@ def Scheduler(scheduler_with_workers):
 
 @pytest.fixture
 def run(Scheduler):
-    async def _run(todo, abort_after=None, check_events=True):
-        scheduler = Scheduler()
+    async def _run(todo, abort_after=None, check_events=True, **kwargs):
+        scheduler = Scheduler(**kwargs)
         if check_events:
             cm = verified_events(scheduler, todo)
         else:
@@ -213,6 +214,33 @@ async def test_decorated_output_from_two_jobs(run, verify_output):
     assert verify_output(
         [[(outprefix + out).format(name=name)] for name in jobs],
         [[(errprefix + err).format(name=name)] for name in jobs],
+    )
+
+
+async def test_decorated_output_via_custom_muxes(run, verify_output):
+    jobs = ['foo', 'bar']
+    out = "This is {name}'s stdout"
+    err = "This is {name}'s stderr"
+
+    todo = [
+        TJob(
+            name,
+            out=out.format(name=name),
+            err=err.format(name=name),
+            decorate=True,
+        )
+        for name in jobs
+    ]
+
+    to_stdout = logmux.LogMux(sys.stdout)
+    to_stderr = logmux.LogMux(sys.stderr)
+    await run(todo, outmux=to_stderr, errmux=to_stdout)
+
+    outprefix = '{name}/out: '
+    errprefix = '{name}/ERR: '
+    assert verify_output(
+        [[(errprefix + err).format(name=name)] for name in jobs],
+        [[(outprefix + out).format(name=name)] for name in jobs],
     )
 
 

@@ -14,10 +14,16 @@ class LogMux:
 
     def __init__(self, out=None, tmp_base=None):
         self.out = sys.stdout if out is None else out
-        self.q = asyncio.Queue()
+        self._q = None
         self.tempdir = TemporaryDirectory(dir=tmp_base, prefix='LogMux_')
         self.fifonum = 0
         self._task = None
+
+    @property
+    def q(self):
+        if self._q is None:
+            self._q = asyncio.Queue()
+        return self._q
 
     async def _watch(self, path, decorator=None):
         """Add the given 'path' to be watched by LogMux.

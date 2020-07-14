@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import functools
 import logging
@@ -108,13 +109,19 @@ class Scheduler(external_work.Scheduler):
     def __init__(
         self, *, outmux=None, errmux=None, context_class=Context, **kwargs
     ):
-        self.outmux = logmux.LogMux(sys.stdout) if outmux is None else outmux
-        self.errmux = logmux.LogMux(sys.stderr) if errmux is None else errmux
+        self.outmux = outmux
+        self.errmux = errmux
 
         assert issubclass(context_class, Context)
         super().__init__(context_class=context_class, **kwargs)
 
     async def _run_tasks(self, *args, **kwargs):
+        if self.outmux is None:
+            self.outmux = logmux.LogMux(sys.stdout)
+        if self.errmux is None:
+            self.errmux = logmux.LogMux(sys.stderr)
+        assert asyncio.get_running_loop() is self.outmux.q._loop
+        assert asyncio.get_running_loop() is self.errmux.q._loop
         logger.debug('Starting LogMux instances…')
         async with self.outmux, self.errmux:
             await super()._run_tasks(*args, **kwargs)
