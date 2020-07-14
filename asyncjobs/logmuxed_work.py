@@ -9,12 +9,12 @@ from . import external_work, logmux
 logger = logging.getLogger(__name__)
 
 
-def redirected_job(decorate_out=None, decorate_err=None, redirect_logger=True):
+def redirected_job(decorate_out=None, decorate_err=None, log_handler=True):
     """Setup stdout/stderr redirection for the given coroutine.
 
     This is the same as wrapping the entire corouting in:
 
-        async with ctx.setup_redirection(...):
+        async with ctx.redirect(...):
             ...
 
     Use as a decorator:
@@ -35,10 +35,10 @@ def redirected_job(decorate_out=None, decorate_err=None, redirect_logger=True):
     def wrap(coro):
         @functools.wraps(coro)
         async def wrapped_coro(ctx):
-            async with ctx.setup_redirection(
+            async with ctx.redirect(
                 decorate_out=decorate_out,
                 decorate_err=decorate_err,
-                redirect_logger=redirect_logger,
+                log_handler=log_handler,
             ):
                 return await coro(ctx)
 
@@ -54,9 +54,9 @@ class Context(external_work.Context):
     output stream(s) controlled by the below Scheduler.
 
     Redirection of the actual stdout/stderr file descriptors is automatically
-    done for subprocesses, and for self.logger (unless redirect_logger is set
-    to False). Other output (from thread workers or directly from .__call__()
-    must be redirected to self.stdout/self.stderr manually.)
+    done for subprocesses, and for loggers (unless log_handler is False).
+    Other output (from thread workers or directly from .__call__() must be
+    redirected to self.stdout/self.stderr manually.)
     """
 
     def __init__(self, *args):
@@ -65,21 +65,21 @@ class Context(external_work.Context):
         self.stderr = None
 
     @contextlib.asynccontextmanager
-    async def setup_redirection(
-        self, *, decorate_out=None, decorate_err=None, redirect_logger=True
+    async def redirect(
+        self, *, decorate_out=None, decorate_err=None, log_handler=True
     ):
         async with self._scheduler.outmux.new_stream(decorate_out) as outf:
             async with self._scheduler.errmux.new_stream(decorate_err) as errf:
                 self.stdout = outf
                 self.stderr = errf
-                log_handler = None
-                if redirect_logger:
+                if log_handler is True:
                     log_handler = logging.StreamHandler(self.stderr)
+                if log_handler:
                     self.logger.addHandler(log_handler)
                 try:
                     yield
                 finally:
-                    if log_handler is not None:
+                    if log_handler:
                         self.logger.removeHandler(log_handler)
                     self.stdout = None
                     self.stderr = None

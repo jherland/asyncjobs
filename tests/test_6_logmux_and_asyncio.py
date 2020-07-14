@@ -7,7 +7,7 @@ from conftest import verify_tasks
 
 
 async def job_coro(ctx):
-    async with ctx.setup_redirection(
+    async with ctx.redirect(
         decorate_out=lambda msg: f'{ctx.name}/out: {msg}',
         decorate_err=lambda msg: f'{ctx.name}/ERR: {msg}',
     ):

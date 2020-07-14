@@ -100,7 +100,7 @@ class TJob(TExternalWorkJob):
         err='',
         in_thread=False,
         decorate=False,
-        redirect_logger=False,
+        log_handler=False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -108,16 +108,16 @@ class TJob(TExternalWorkJob):
             self.thread = print_out_err(out, err, sync=True)
         elif 'subproc' not in kwargs:
             self.do_work = print_out_err(out, err, sync=False)
-        self.redirect_logger = redirect_logger
+        self.log_handler = log_handler
         self.decorate_out, self.decorate_err = None, None
         if decorate:
             self.decorate_out, self.decorate_err = decorators(self.name)
 
     async def __call__(self, ctx):
-        async with ctx.setup_redirection(
+        async with ctx.redirect(
             decorate_out=self.decorate_out,
             decorate_err=self.decorate_err,
-            redirect_logger=self.redirect_logger,
+            log_handler=self.log_handler,
         ):
             return await super().__call__(ctx)
 
@@ -459,7 +459,7 @@ async def test_redirected_job_no_decoration(run, verify_output):
 async def test_redirected_job_decorate_without_logger(run, verify_output):
     dec_out, dec_err = decorators('foo')
 
-    @logmuxed_work.redirected_job(dec_out, dec_err, False)
+    @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
@@ -493,7 +493,7 @@ async def test_redirected_job_with_decorated_subproc(run, verify_output):
     dec_out, dec_err = decorators('foo')
     argv = mock_out_err_argv('Printing to stdout', 'Printing to stderr')
 
-    @logmuxed_work.redirected_job(dec_out, dec_err, False)
+    @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
     async def job(ctx):
         async with ctx.subprocess(argv) as proc:
             await proc.wait()
@@ -509,7 +509,7 @@ async def test_redirected_job_with_subproc_output_capture(run, verify_output):
     dec_out, dec_err = decorators('foo')
     argv = mock_out_err_argv('Printing to stdout', 'Printing to stderr')
 
-    @logmuxed_work.redirected_job(dec_out, dec_err, False)
+    @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
     async def job(ctx):
         async with ctx.subprocess(argv, stdout=PIPE) as proc:
             output = await proc.stdout.read()
