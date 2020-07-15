@@ -1,5 +1,6 @@
 import pytest
 from subprocess import PIPE
+import time
 
 from asyncjobs import external_work, signal_handling
 
@@ -56,14 +57,14 @@ async def test_abort_one_job_returns_immediately(run):
 
 
 async def test_abort_one_job_in_thread_cannot_return_immediately(run):
-    todo = [TJob('foo', thread_sleep=0.2)]
+    todo = [TJob('foo', thread=lambda ctx: time.sleep(0.2))]
     with assert_elapsed_time(lambda t: t > 0.2):  # must wait for thread
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {'foo': Cancelled})
 
 
 async def test_abort_one_job_in_subproc_returns_immediately(run):
-    todo = [TJob('foo', subproc_sleep=30)]
+    todo = [TJob('foo', argv=mock_argv('sleep:30'))]
     with assert_elapsed_time(lambda t: t < 0.3):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {'foo': Cancelled})
@@ -81,8 +82,8 @@ async def test_abort_one_spawned_job_returns_immediately(run):
 async def test_abort_one_non_terminating_job_teminates_then_kills(run):
     argv = mock_argv('ignore:SIGTERM', 'ignore:SIGINT', 'FOO', 'sleep:30')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result='kill'):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result='kill'):
             async with ctx.subprocess(
                 argv, stdout=PIPE, kill_delay=0.1
             ) as proc:
@@ -91,7 +92,7 @@ async def test_abort_one_non_terminating_job_teminates_then_kills(run):
                 with abort_in(0.1):
                     await proc.wait()
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     with assert_elapsed_time(lambda t: t < 0.5):
         done = await run(todo)
     assert verify_tasks(done, {'foo': Cancelled})
@@ -104,15 +105,15 @@ async def test_abort_job_with_two_subprocs_terminates_both(run, num_workers):
 
     argv = mock_argv('sleep:30')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result='terminate'):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result='terminate'):
             async with ctx.subprocess(argv) as proc1:
-                with tjob.subprocess_xevents(argv, result='terminate'):
+                with ctx.tjob.subprocess_xevents(argv, result='terminate'):
                     async with ctx.subprocess(argv) as proc2:
                         await proc2.wait()
                 await proc1.wait()
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     with assert_elapsed_time(lambda t: t < 0.5):
         done = await run(todo, abort_after=0.2)
     assert verify_tasks(done, {'foo': Cancelled})
@@ -125,13 +126,13 @@ async def test_abort_job_with_two_non_terminating_kills_both(run, num_workers):
     argv1 = mock_argv('ignore:SIGTERM', 'ignore:SIGINT', 'FOO', 'sleep:30')
     argv2 = mock_argv('ignore:SIGTERM', 'ignore:SIGINT', 'BAR', 'sleep:30')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv1, result='kill'):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv1, result='kill'):
             async with ctx.subprocess(
                 argv1, stdout=PIPE, kill_delay=0.1
             ) as proc1:
                 assert b'FOO\n' == await proc1.stdout.readline()
-                with tjob.subprocess_xevents(argv2, result='kill'):
+                with ctx.tjob.subprocess_xevents(argv2, result='kill'):
                     async with ctx.subprocess(
                         argv2, stdout=PIPE, kill_delay=0.1
                     ) as proc2:
@@ -142,7 +143,7 @@ async def test_abort_job_with_two_non_terminating_kills_both(run, num_workers):
                             await proc2.wait()
                 await proc1.wait()
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     with assert_elapsed_time(lambda t: t < 1.0):
         done = await run(todo)
     assert verify_tasks(done, {'foo': Cancelled})
@@ -156,14 +157,17 @@ async def test_abort_hundred_jobs_returns_immediately(run):
 
 
 async def test_abort_hundred_jobs_in_threads_cannot_return_immediately(run):
-    todo = [TJob(f'foo #{i}', thread_sleep=0.3) for i in range(100)]
+    todo = [
+        TJob(f'foo #{i}', thread=lambda ctx: time.sleep(0.3))
+        for i in range(100)
+    ]
     with assert_elapsed_time(lambda t: t > 0.3):  # must wait for all threads
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})
 
 
 async def test_abort_hundred_jobs_in_subprocs_returns_immediately(run):
-    todo = [TJob(f'foo #{i}', subproc_sleep=5.0) for i in range(100)]
+    todo = [TJob(f'foo #{i}', argv=mock_argv('sleep:5')) for i in range(100)]
     with assert_elapsed_time(lambda t: t < 2.0):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {f'foo #{i}': Cancelled for i in range(100)})

@@ -78,7 +78,7 @@ async def test_one_failed_between_two_ok_jobs_in_threads_cancels_last(run):
 
 async def test_one_ok_job_in_subproc(run, tmp_path):
     path = tmp_path / 'foo'
-    todo = [TJob('foo', subproc=mock_argv(f'touch:{path}'))]
+    todo = [TJob('foo', argv=mock_argv(f'touch:{path}'))]
     done = await run(todo)
     assert verify_tasks(done, {'foo': 0})
     assert path.is_file()
@@ -88,9 +88,9 @@ async def test_one_failed_between_two_in_subprocs_cancels_last(run, tmp_path):
     foo_path = tmp_path / 'foo'
     baz_path = tmp_path / 'baz'
     todo = [
-        TJob('foo', before={'bar'}, subproc=mock_argv(f'touch:{foo_path}')),
-        TJob('bar', {'foo'}, before={'baz'}, subproc=mock_argv('exit:1')),
-        TJob('baz', {'bar'}, subproc=mock_argv(f'touch:{baz_path}')),
+        TJob('foo', before={'bar'}, argv=mock_argv(f'touch:{foo_path}')),
+        TJob('bar', {'foo'}, before={'baz'}, argv=mock_argv('exit:1')),
+        TJob('baz', {'bar'}, argv=mock_argv(f'touch:{baz_path}')),
     ]
     done = await run(todo)
     assert verify_tasks(
@@ -111,14 +111,14 @@ async def test_one_failed_between_two_in_subprocs_cancels_last(run, tmp_path):
 async def test_one_ok_subprocess_with_output(run):
     argv = mock_argv('FOO')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result=0):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result=0):
             async with ctx.subprocess(argv, stdout=PIPE) as proc:
                 output = await proc.stdout.read()
                 await proc.wait()
         return output
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': b'FOO\n'})
 
@@ -126,14 +126,14 @@ async def test_one_ok_subprocess_with_output(run):
 async def test_one_ok_subprocess_with_error_output(run):
     argv = mock_argv('err:', 'FOO')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result=0):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result=0):
             async with ctx.subprocess(argv, stderr=PIPE) as proc:
                 output = await proc.stderr.read()
                 await proc.wait()
         return output
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': b'FOO\n'})
 
@@ -141,8 +141,8 @@ async def test_one_ok_subprocess_with_error_output(run):
 async def test_one_ok_subprocess_with_error_and_output_redirected(run):
     argv = mock_argv('err:', 'FOO', 'out:', 'BAR')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result=0):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result=0):
             async with ctx.subprocess(
                 argv, stdout=PIPE, stderr=STDOUT
             ) as proc:
@@ -150,7 +150,7 @@ async def test_one_ok_subprocess_with_error_and_output_redirected(run):
                 await proc.wait()
         return output
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': b'FOO\nBAR\n'})
 
@@ -158,15 +158,15 @@ async def test_one_ok_subprocess_with_error_and_output_redirected(run):
 async def test_one_failing_subprocess_with_output_default_check(run):
     argv = mock_argv('FOO', 'exit:1')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result=1):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result=1):
             async with ctx.subprocess(argv, stdout=PIPE) as proc:
                 output = await proc.stdout.read()
                 await proc.wait()
                 assert proc.returncode == 1
         return output
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': b'FOO\n'})
 
@@ -174,15 +174,15 @@ async def test_one_failing_subprocess_with_output_default_check(run):
 async def test_one_failing_subprocess_with_output_disable_check(run):
     argv = mock_argv('FOO', 'exit:1')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result=1):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result=1):
             async with ctx.subprocess(argv, stdout=PIPE, check=False) as proc:
                 output = await proc.stdout.read()
                 await proc.wait()
                 assert proc.returncode == 1
         return output
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': b'FOO\n'})
 
@@ -190,8 +190,8 @@ async def test_one_failing_subprocess_with_output_disable_check(run):
 async def test_one_failing_subprocess_with_output_enable_check(run):
     argv = mock_argv('FOO', 'exit:1')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result=1):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result=1):
             async with ctx.subprocess(argv, stdout=PIPE, check=True) as proc:
                 output = await proc.stdout.read()
                 assert output == b'FOO\n'
@@ -200,7 +200,7 @@ async def test_one_failing_subprocess_with_output_enable_check(run):
 
         assert False  # skipped due to CalledProcessError on context exit
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': CalledProcessError(1, argv)})
 
@@ -210,14 +210,14 @@ async def test_subprocess_with_custom_cwd(run, tmp_path):
     cwd = tmp_path / 'custom'
     cwd.mkdir()
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result=0):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result=0):
             async with ctx.subprocess(argv, stdout=PIPE, cwd=cwd) as proc:
                 output = await proc.stdout.read()
                 await proc.wait()
         return Path(os.fsdecode(output.rstrip()))
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': cwd})
 
@@ -227,14 +227,14 @@ async def test_subprocess_with_custom_env(run):
     env = os.environ.copy()
     env['FOOBAR'] = 'BAZZLE'
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result=0):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result=0):
             async with ctx.subprocess(argv, stdout=PIPE, env=env) as proc:
                 output = await proc.stdout.read()
                 await proc.wait()
         return output
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': b'BAZZLE\n'})
 
@@ -245,14 +245,14 @@ async def test_subprocess_with_custom_env(run):
 async def test_not_awaiting_subprocess_terminates_it(run):
     argv = mock_argv('FOO', 'sleep:5')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result='terminate'):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result='terminate'):
             async with ctx.subprocess(argv, stdout=PIPE) as proc:
                 output = await proc.stdout.readline()
                 # MISSING await proc.wait() here to trigger termination
         return output
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': b'FOO\n'})
 
@@ -260,15 +260,15 @@ async def test_not_awaiting_subprocess_terminates_it(run):
 async def test_partial_read_from_subprocess_before_terminating_it(run):
     argv = mock_argv('FOO', 'BAR', 'sleep:5', 'BAZ')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result='terminate'):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result='terminate'):
             async with ctx.subprocess(argv, stdout=PIPE) as proc:
                 output = await proc.stdout.readline()
                 output += await proc.stdout.readline()
                 # MISSING await proc.wait() here to trigger termination
         return output
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     done = await run(todo)
     assert verify_tasks(done, {'foo': b'FOO\nBAR\n'})
 
@@ -276,8 +276,8 @@ async def test_partial_read_from_subprocess_before_terminating_it(run):
 async def test_non_terminating_subprocess_is_killed(run):
     argv = mock_argv('ignore:SIGTERM', 'FOO', 'sleep:5')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv, result='kill'):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result='kill'):
             async with ctx.subprocess(
                 argv, stdout=PIPE, kill_delay=0.1
             ) as proc:
@@ -285,7 +285,7 @@ async def test_non_terminating_subprocess_is_killed(run):
                 # MISSING await proc.wait() here to trigger termination
         return output
 
-    todo = [TJob('foo', subproc=coro)]
+    todo = [TJob('foo', coro=coro)]
     with assert_elapsed_time(lambda t: t < 0.5):
         done = await run(todo)
     assert verify_tasks(done, {'foo': b'FOO\n'})
@@ -299,13 +299,13 @@ async def test_two_threads_concurrently(run, num_workers):
         time.sleep(0.1)
         return ret
 
-    async def coro(tjob, ctx):
+    async def coro(ctx):
         return await asyncio.gather(
             ctx.call_in_thread(thread_func, 'FOO'),
             ctx.call_in_thread(thread_func, 'BAR'),
         )
 
-    job = TJob('foo', thread=coro)
+    job = TJob('foo', coro=coro)
     if num_workers < 2:  # Cannot allocate second worker
         job.xevents.add('await worker slot')
         job.xevents.add('awaited worker slot')
@@ -324,12 +324,12 @@ async def test_two_threads_concurrently(run, num_workers):
 async def test_two_subprocesses_concurrently(run, num_workers):
     argv = mock_argv()
 
-    async def coro(tjob, ctx):
+    async def coro(ctx):
         return await asyncio.gather(
             ctx.run_in_subprocess(argv), ctx.run_in_subprocess(argv),
         )
 
-    job = TJob('foo', subproc=coro)
+    job = TJob('foo', coro=coro)
     if num_workers < 2:  # Cannot allocate second worker
         with job.subprocess_xevents(argv, result='abort'):
             expect_result = RuntimeError(
@@ -347,7 +347,7 @@ async def test_two_subprocesses_with_output_concurrently(run, num_workers):
     argv1 = mock_argv('FOO')
     argv2 = mock_argv('BAR')
 
-    async def coro(tjob, ctx):
+    async def coro(ctx):
         async with ctx.subprocess(argv1, stdout=PIPE) as proc1:
             async with ctx.subprocess(argv2, stdout=PIPE) as proc2:
                 output2 = await proc2.stdout.read()
@@ -356,7 +356,7 @@ async def test_two_subprocesses_with_output_concurrently(run, num_workers):
             await proc1.wait()
         return output1 + output2
 
-    job = TJob('foo', subproc=coro)
+    job = TJob('foo', coro=coro)
     if num_workers < 2:  # Cannot allocate second worker
         with job.subprocess_xevents(argv1, result='terminate'):
             expect_result = RuntimeError(
@@ -377,10 +377,10 @@ async def test_pass_data_between_subprocesses(run, num_workers):
     argv_src = mock_argv('FOO', 'BAR', 'BAZ')
     argv_dst = mock_argv('foo', 'in:', 'bar', 'in:', 'baz', 'in:')
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv_src, result=0):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv_src, result=0):
             async with ctx.subprocess(argv_src, stdout=PIPE) as proc_src:
-                with tjob.subprocess_xevents(argv_dst, result=0):
+                with ctx.tjob.subprocess_xevents(argv_dst, result=0):
                     async with ctx.subprocess(
                         argv_dst, stdin=PIPE, stdout=PIPE
                     ) as proc_dst:
@@ -390,7 +390,7 @@ async def test_pass_data_between_subprocesses(run, num_workers):
                 await proc_src.wait()
         return output
 
-    job = TJob('foo', subproc=coro)
+    job = TJob('foo', coro=coro)
     done = await run([job])
     assert verify_tasks(done, {'foo': b'foo\nFOO\nbar\nBAR\nbaz\nBAZ\n'})
 
@@ -404,12 +404,12 @@ async def test_pass_data_between_subprocesses_outer_fails(run, num_workers):
     # Outer/src process does exit 1 while inner process is waiting for input.
     # Inner/dst process gets EOF, prints empty string, and does exit 0.
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv_src, result=1):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv_src, result=1):
             async with ctx.subprocess(
                 argv_src, stdout=PIPE, check=True
             ) as proc_src:
-                with tjob.subprocess_xevents(argv_dst, result=0):
+                with ctx.tjob.subprocess_xevents(argv_dst, result=0):
                     async with ctx.subprocess(
                         argv_dst, stdin=PIPE, stdout=PIPE, check=True
                     ) as proc_dst:
@@ -419,7 +419,7 @@ async def test_pass_data_between_subprocesses_outer_fails(run, num_workers):
                 await proc_src.wait()
         return output
 
-    job = TJob('foo', subproc=coro)
+    job = TJob('foo', coro=coro)
     done = await run([job])
     assert verify_tasks(done, {'foo': CalledProcessError(1, argv_src)})
 
@@ -435,12 +435,12 @@ async def test_pass_data_between_subprocesses_inner_fails(run, num_workers):
     # Adding check=True here complicates the test as the outer process
     # may or may not be terminated by the inner's CalledProcessError(2).
 
-    async def coro(tjob, ctx):
-        with tjob.subprocess_xevents(argv_src, result=0):
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv_src, result=0):
             async with ctx.subprocess(
                 argv_src, stdout=PIPE, check=True
             ) as proc_src:
-                with tjob.subprocess_xevents(argv_dst, result=2):
+                with ctx.tjob.subprocess_xevents(argv_dst, result=2):
                     async with ctx.subprocess(
                         argv_dst, stdin=PIPE, stdout=PIPE
                     ) as proc_dst:
@@ -451,7 +451,7 @@ async def test_pass_data_between_subprocesses_inner_fails(run, num_workers):
                 await proc_src.wait()
         return proc_dst.returncode, output
 
-    job = TJob('foo', subproc=coro)
+    job = TJob('foo', coro=coro)
     done = await run([job])
     assert verify_tasks(done, {'foo': (2, b'foo\nFOO\nbar\nBAR\n')})
 

@@ -9,6 +9,7 @@ import pytest
 import signal
 from subprocess import CalledProcessError
 import time
+import traceback
 
 from verify_events import EventVerifier, ExpectedJobEvents, Whatever
 
@@ -74,8 +75,8 @@ class TBasicJob:
         deps=None,
         *,
         before=None,
-        call=None,
         async_sleep=0,
+        coro=None,
         spawn=None,
         await_spawn=False,
         result=None,
@@ -83,11 +84,11 @@ class TBasicJob:
         self.name = name
         self.deps = deps
         self.before = set() if before is None else set(before)
-        self.call = call
         self.async_sleep = async_sleep
+        self.coro = coro
         self.spawn = [] if spawn is None else spawn
         self.await_spawn = await_spawn
-        self.result = '{} done'.format(name) if result is None else result
+        self.result = f'{name} done' if result is None else result
 
         self.xevents = ExpectedJobEvents(name)
         self.xevents.add('add')
@@ -107,25 +108,37 @@ class TBasicJob:
             yield spawn
             yield from spawn.descendants()
 
-    async def do_work(self, ctx):
-        result = None
-        if self.call:
-            result = self.call()
-        return self.result if result is None else result
-
     async def __call__(self, ctx):
+        # Await results from dependencies
         dep_results = ctx.deps
         if self.deps:
             self.xevents.add('awaited results')
         ctx.logger.debug(f'Results from deps: {dep_results}')
 
+        # Sleep, if requested
         if self.async_sleep:
             ctx.logger.info(f'Async sleep for {self.async_sleep} seconds…')
             await asyncio.sleep(self.async_sleep)
             ctx.logger.info('Finished async sleep')
 
-        result = await self.do_work(ctx)
+        # Do the scheduled work
+        if self.coro is not None:
+            try:
+                ctx.tjob = self  # give test code access to test job instance
+                coro = self.coro(ctx)
+                assert asyncio.iscoroutine(coro), f'not a coroutine: {coro}'
+                self.result = await coro
+            except asyncio.CancelledError:
+                ctx.logger.info('Cancelled!')
+                self.xevents.add('finish', fate='cancelled')
+                raise
+            except Exception as e:
+                ctx.logger.info(f'Raising exception: {e!r}')
+                traceback.print_exc()
+                self.xevents.add('finish', fate='failed')
+                raise
 
+        # Spawn children jobs
         for job in self.spawn:
             ctx.add_job(job.name, job, job.deps)
 
@@ -135,45 +148,41 @@ class TBasicJob:
             await ctx.results(*[job.name for job in self.spawn])
             self.xevents.add('awaited results')
 
+        # Verify that our dependents are still waiting for us
         for b in self.before:
             assert b in ctx._scheduler.tasks  # The other job has started
             assert not ctx._scheduler.tasks[b].done()  # but not yet finished
 
-        if isinstance(result, Exception):
-            ctx.logger.info(f'Raising exception: {result!r}')
+        # Return result or raise exception
+        if isinstance(self.result, Exception):
+            ctx.logger.info(f'Raising exception: {self.result!r}')
             self.xevents.add('finish', fate='failed')
-            raise result
+            raise self.result
         else:
-            ctx.logger.info(f'Returning result: {result!r}')
+            ctx.logger.info(f'Returning result: {self.result!r}')
             self.xevents.add('finish', fate='success')
-            return result
+            return self.result
 
 
 class TExternalWorkJob(TBasicJob):
     """Test jobs with thread/subprocess capabilities."""
 
-    def __init__(
-        self,
-        *args,
-        thread_sleep=0,
-        thread=None,
-        subproc_sleep=0,
-        subproc=None,
-        **kwargs,
-    ):
+    def __init__(self, *args, thread=None, argv=None, **kwargs):
         super().__init__(*args, **kwargs)
-        if thread_sleep:
-            if thread is not None:
-                raise ValueError('Cannot both sleep and work in thread')
-            self.thread = lambda ctx: time.sleep(thread_sleep)
-        else:
-            self.thread = thread
-        if subproc_sleep:
-            if subproc is not None:
-                raise ValueError('Cannot both sleep and work in subprocess')
-            self.subproc = ['sleep', str(subproc_sleep)]
-        else:
-            self.subproc = subproc
+        if thread:
+            assert argv is None and self.coro is None
+            self.coro = partial(self.run_thread, thread)
+        elif argv:
+            assert thread is None and self.coro is None
+            self.coro = partial(self.run_subprocess, argv)
+
+    async def run_thread(self, thread, ctx):
+        with self.thread_xevents():
+            return await ctx.call_in_thread(thread, ctx)
+
+    async def run_subprocess(self, argv, ctx):
+        with self.subprocess_xevents(argv, may_cancel=True):
+            return await ctx.run_in_subprocess(argv, check=True)
 
     @contextmanager
     def thread_xevents(self):
@@ -193,21 +202,6 @@ class TExternalWorkJob(TBasicJob):
         except Exception:
             self.xevents.add('finish work in thread', fate='failed')
             raise
-
-    async def do_thread_stuff(self, ctx):
-        ctx.logger.debug(f'Start call to {self.thread} in thread…')
-        try:
-            if asyncio.iscoroutinefunction(self.thread):
-                ret = await self.thread(self, ctx)
-            else:
-                with self.thread_xevents():
-                    ret = await ctx.call_in_thread(self.thread, ctx)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            ret = e
-        ctx.logger.debug(f'Finished thread call: {ret!r}')
-        return ret
 
     @contextmanager
     def subprocess_xevents(self, argv, result=None, may_cancel=False):
@@ -265,29 +259,6 @@ class TExternalWorkJob(TBasicJob):
                     returncode=result,
                     may_cancel=may_cancel,
                 )
-
-    async def do_subproc_stuff(self, ctx):
-        ctx.logger.debug(f'Start running {self.subproc}…')
-        try:
-            if asyncio.iscoroutinefunction(self.subproc):
-                ret = await self.subproc(self, ctx)
-            else:
-                with self.subprocess_xevents(self.subproc, may_cancel=True):
-                    ret = await ctx.run_in_subprocess(self.subproc, check=True)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            ret = e
-        ctx.logger.debug(f'Finished subprocess run: {ret}')
-        return ret
-
-    async def do_work(self, ctx):
-        result = await super().do_work(ctx)
-        if self.thread:
-            result = await self.do_thread_stuff(ctx)
-        if self.subproc:
-            result = await self.do_subproc_stuff(ctx)
-        return result
 
 
 class ListHandler(logging.Handler):

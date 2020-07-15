@@ -21,14 +21,16 @@ from conftest import (
 pytestmark = pytest.mark.asyncio
 
 
-def shuffled_prints(out_f, err_f, out_str, err_str):
-    """Print out_str -> out_f and err_str -> err_f in shuffled order.
+def shuffled_prints(out_f, err_f, out_strings, err_strings):
+    """Print out_strings -> out_f and err_strings -> err_f in shuffled order.
 
-    Return a stream of callables that together prints out_str -> out_f and
-    err_str -> err_f such that the each char is printed in order, but the
-    out_f and err_f prints are interleaved in a random order. E.g. this call:
+    Return a stream of callables that together prints out_strings -> out_f and
+    err_strings -> err_f such that each is processed in order (out_strings is
+    printed in order to out_f, and err_strings is printed in order to err_f),
+    but the out_f and err_f prints are interleaved in a random order. E.g.
+    this call:
 
-        shuffled_prints(sys.stdout, sys.stderr, 'foo', 'bar')
+        shuffled_prints(sys.stdout, sys.stderr, list('foo'), list('bar'))
 
     might result in the following (un-called) prints being yielded:
 
@@ -43,10 +45,10 @@ def shuffled_prints(out_f, err_f, out_str, err_str):
     rescheduling/ordering of tasks and internal handling of file descriptors.
     """
 
-    def prints(f, s):
-        """Yield callables that print each char of s to f, in order."""
-        for c in s:
-            yield functools.partial(print, c, file=f, end='')
+    def prints(f, items):
+        """Yield callables that print each item of items to f, in order."""
+        for item in items:
+            yield functools.partial(print, item, file=f, end='')
 
     def random_interleave(*iterators):
         """Yield from each iterator in random order until all are exhausted."""
@@ -58,37 +60,16 @@ def shuffled_prints(out_f, err_f, out_str, err_str):
             except StopIteration:  # iterators[i] is exhausted
                 del iterators[i]
 
-    out_prints = prints(out_f, out_str)
-    err_prints = prints(err_f, err_str)
+    out_prints = prints(out_f, out_strings)
+    err_prints = prints(err_f, err_strings)
     yield from random_interleave(out_prints, err_prints)
 
 
-def print_out_err(out, err, *, sync):
-    # out/err are strings or lists of strings. If strings, the chars in the
-    # string will be printed one-by-one, if lists of strings, each string
-    # will be printed with a trailing newline.
-    if isinstance(out, list):  # list of strings
-        out = [line + '\n' for line in out]
-    if isinstance(err, list):  # list of strings
-        err = [line + '\n' for line in err]
-
-    async def print_out_err_async(ctx):
-        for print_one in shuffled_prints(ctx.stdout, ctx.stderr, out, err):
-            print_one()
-            await asyncio.sleep(0)
-
-    def print_out_err_sync(ctx):
-        for print_one in shuffled_prints(ctx.stdout, ctx.stderr, out, err):
-            print_one()
-            time.sleep(0.001)
-
-    return print_out_err_sync if sync else print_out_err_async
-
-
 def decorators(job_name):
+    """Return pair of out/err decorators that prefix job_name onto lines."""
     return (
-        lambda msg: f'{job_name}/out: {msg.rstrip()}\n',
-        lambda msg: f'{job_name}/ERR: {msg.rstrip()}\n',
+        lambda line: f'{job_name}/out: {line}',
+        lambda line: f'{job_name}/ERR: {line}',
     )
 
 
@@ -96,30 +77,98 @@ class TJob(TExternalWorkJob):
     def __init__(
         self,
         *args,
-        out='',
-        err='',
-        in_thread=False,
-        decorate=False,
+        mode=None,
+        out=None,
+        err=None,
+        decorate=True,
         log_handler=False,
+        extras=None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        if in_thread:
-            self.thread = print_out_err(out, err, sync=True)
-        elif 'subproc' not in kwargs:
-            self.do_work = print_out_err(out, err, sync=False)
+
+        Modes = {
+            'async': self.do_async,
+            'thread': self.do_thread,
+            'mock_argv': self.do_mock_argv,
+            'custom': self.coro,
+        }
+        self.coro = Modes[mode or ('async' if self.coro is None else 'custom')]
+
+        self.out = f"This is {self.name}'s stdout\n" if out is None else out
+        self.err = f"This is {self.name}'s stderr\n" if err is None else err
+        self.decorate = decorate
         self.log_handler = log_handler
-        self.decorate_out, self.decorate_err = None, None
-        if decorate:
-            self.decorate_out, self.decorate_err = decorators(self.name)
+        self.extras = extras
 
     async def __call__(self, ctx):
+        if self.decorate:
+            dec_out, dec_err = decorators(self.name)
+        else:
+            dec_out, dec_err = None, None
         async with ctx.redirect(
-            decorate_out=self.decorate_out,
-            decorate_err=self.decorate_err,
+            decorate_out=dec_out,
+            decorate_err=dec_err,
             log_handler=self.log_handler,
         ):
             return await super().__call__(ctx)
+
+    def xout(self):
+        """Return expected stdout data from this job."""
+        dec = decorators(self.name)[0] if self.decorate else lambda s: s
+        if isinstance(self.out, list):
+            return [dec(line + '\n').rstrip() for line in self.out]
+        else:
+            return [dec(self.out).rstrip()]
+
+    def xerr(self):
+        """Return expected stderr data from this job."""
+        dec = decorators(self.name)[1] if self.decorate else lambda s: s
+        if isinstance(self.err, list):
+            return [dec(line + '\n').rstrip() for line in self.err]
+        else:
+            return [dec(self.err).rstrip()]
+
+    def shuffled_out_err(self, out_f, err_f):
+        if isinstance(self.out, list):  # lines from list of strings
+            out = (line + '\n' for line in self.out)
+        else:  # characters from string
+            out = (char for char in self.out)
+        if isinstance(self.err, list):  # lines from list of strings
+            err = (line + '\n' for line in self.err)
+        else:  # characters from string
+            err = (char for char in self.err)
+        return shuffled_prints(out_f, err_f, out, err)
+
+    def mock_argv(self, extra_args=None):
+        """Return a suitable mock_argv for doing this job in a subprocess."""
+        assert self.out.endswith('\n')  # newline-terminated string
+        assert self.err.endswith('\n')  # newline-terminated string
+        args = ['out:', self.out.rstrip()]
+        for arg in extra_args or []:
+            if not arg.startswith('exit:'):
+                args.append(arg)
+        args += ['err:', self.err.rstrip()]
+        for arg in extra_args or []:
+            if arg.startswith('exit:'):
+                args.append(arg)
+        return mock_argv(*args)
+
+    async def do_async(self, ctx):
+        for print_one in self.shuffled_out_err(ctx.stdout, ctx.stderr):
+            print_one()
+            await asyncio.sleep(0)
+
+    async def do_thread(self, ctx):
+        def in_thread(ctx):
+            for print_one in self.shuffled_out_err(ctx.stdout, ctx.stderr):
+                print_one()
+                time.sleep(0.001)
+
+        return await self.run_thread(in_thread, ctx)
+
+    async def do_mock_argv(self, ctx):
+        return await self.run_subprocess(self.mock_argv(self.extras), ctx)
 
 
 @pytest.fixture
@@ -146,17 +195,6 @@ def run(Scheduler):
     return _run
 
 
-def mock_out_err_argv(out, err, sleep=0, exit=0, **kwargs):
-    return mock_argv(
-        'out:',
-        out.format(**kwargs),
-        f'sleep:{sleep}',
-        'err:',
-        err.format(**kwargs),
-        f'exit:{exit}',
-    )
-
-
 # no output
 
 
@@ -166,144 +204,104 @@ async def test_no_output_from_no_jobs(run, verify_output):
 
 
 async def test_no_output_from_two_jobs(run, verify_output):
-    await run([TJob('foo'), TJob('bar')])
+    await run([TJob('foo', out='', err=''), TJob('bar', out='', err='')])
     assert verify_output([[], []], [[], []])
 
 
 # undecorated output
 
 
-async def test_default_output_is_undecorated(run, verify_output):
-    jobs = ['foo', 'bar']
-    out = "This is {name}'s stdout"
-    err = "This is {name}'s stderr"
-
+async def test_undecorated_charwise_output_from_two_jobs(run, verify_output):
     todo = [
-        # Pass out/err as lists of strings to print entire strings at once
-        TJob(name, out=[out.format(name=name)], err=[err.format(name=name)])
-        for name in jobs
+        TJob(
+            name,
+            out=f"char by char to {name}'s stdout\n",
+            err=f"char by char to {name}'s stderr\n",
+            decorate=False,
+        )
+        for name in ['foo', 'bar']
     ]
     await run(todo)
     assert verify_output(
-        [[out.format(name=name)] for name in jobs],
-        [[err.format(name=name)] for name in jobs],
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+
+
+async def test_undecorated_linewise_output_from_two_jobs(run, verify_output):
+    todo = [
+        TJob(
+            name,
+            out=['line', 'by', 'line', 'to', f"{name}'s", 'stdout'],
+            err=['line', 'by', 'line', 'to', f"{name}'s", 'stderr'],
+            decorate=False,
+        )
+        for name in ['foo', 'bar']
+    ]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
     )
 
 
 # decorated output
 
 
-async def test_decorated_output_from_two_jobs(run, verify_output):
-    jobs = ['foo', 'bar']
-    out = "This is {name}'s stdout"
-    err = "This is {name}'s stderr"
-
+async def test_decorated_charwise_output_from_two_jobs(run, verify_output):
     todo = [
         TJob(
             name,
-            out=out.format(name=name),
-            err=err.format(name=name),
-            decorate=True,
+            out=f"char by char to {name}'s stdout\n",
+            err=f"char by char to {name}'s stderr\n",
         )
-        for name in jobs
+        for name in ['foo', 'bar']
     ]
     await run(todo)
-
-    outprefix = '{name}/out: '
-    errprefix = '{name}/ERR: '
     assert verify_output(
-        [[(outprefix + out).format(name=name)] for name in jobs],
-        [[(errprefix + err).format(name=name)] for name in jobs],
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+
+
+async def test_decorated_linewise_output_from_two_jobs(run, verify_output):
+    todo = [
+        TJob(
+            name,
+            out=['line', 'by', 'line', 'to', f"{name}'s", 'stdout'],
+            err=['line', 'by', 'line', 'to', f"{name}'s", 'stderr'],
+        )
+        for name in ['foo', 'bar']
+    ]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
     )
 
 
 async def test_decorated_output_via_custom_muxes(run, verify_output):
-    jobs = ['foo', 'bar']
-    out = "This is {name}'s stdout"
-    err = "This is {name}'s stderr"
-
-    todo = [
-        TJob(
-            name,
-            out=out.format(name=name),
-            err=err.format(name=name),
-            decorate=True,
-        )
-        for name in jobs
-    ]
-
+    todo = [TJob(name) for name in ['foo', 'bar']]
     to_stdout = logmux.LogMux(sys.stdout)
     to_stderr = logmux.LogMux(sys.stderr)
-    await run(todo, outmux=to_stderr, errmux=to_stdout)
-
-    outprefix = '{name}/out: '
-    errprefix = '{name}/ERR: '
+    await run(todo, outmux=to_stderr, errmux=to_stdout)  # flip stderr/stdout
     assert verify_output(
-        [[(errprefix + err).format(name=name)] for name in jobs],
-        [[(outprefix + out).format(name=name)] for name in jobs],
+        [job.xerr() for job in todo], [job.xout() for job in todo],  # flipped
     )
 
 
 async def test_decorated_output_from_spawned_jobs(run, verify_output):
-    foo = TJob(
-        'foo',
-        out="This is foo's stdout",
-        err="This is foo's stderr",
-        decorate=True,
-        spawn=[
-            TJob(
-                'bar',
-                out="This is bar's stdout",
-                err="This is bar's stderr",
-                decorate=True,
-                spawn=[
-                    TJob(
-                        'baz',
-                        out="This is baz's stdout",
-                        err="This is baz's stderr",
-                        decorate=True,
-                    )
-                ],
-            )
-        ],
-    )
+    baz = TJob('baz')
+    bar = TJob('bar', spawn=[baz])
+    foo = TJob('foo', spawn=[bar])
     await run([foo])
     assert verify_output(
-        [
-            ["foo/out: This is foo's stdout"],
-            ["bar/out: This is bar's stdout"],
-            ["baz/out: This is baz's stdout"],
-        ],
-        [
-            ["foo/ERR: This is foo's stderr"],
-            ["bar/ERR: This is bar's stderr"],
-            ["baz/ERR: This is baz's stderr"],
-        ],
+        [job.xout() for job in [foo, bar, baz]],
+        [job.xerr() for job in [foo, bar, baz]],
     )
 
 
 async def test_decorated_output_from_thread_worker(run, verify_output):
-    jobs = ['foo', 'bar']
-    out = "This is {name}'s stdout"
-    err = "This is {name}'s stderr"
-
-    todo = [
-        TJob(
-            name,
-            out=out.format(name=name),
-            err=err.format(name=name),
-            decorate=True,
-            in_thread=True,
-        )
-        for name in jobs
-    ]
+    todo = [TJob(name, mode='thread') for name in ['foo', 'bar']]
     await run(todo)
-
-    outprefix = '{name}/out: '
-    errprefix = '{name}/ERR: '
     assert verify_output(
-        [[(outprefix + out).format(name=name)] for name in jobs],
-        [[(errprefix + err).format(name=name)] for name in jobs],
+        [job.xout() for job in todo], [job.xerr() for job in todo],
     )
 
 
@@ -311,131 +309,76 @@ async def test_decorated_output_from_thread_worker(run, verify_output):
 
 
 async def test_decorated_output_from_subprocess_worker(run, verify_output):
-    jobs = ['foo', 'bar']
-    out = "This is {name}'s stdout"
-    err = "This is {name}'s stderr"
-
-    todo = [
-        TJob(
-            name,
-            decorate=True,
-            subproc=mock_out_err_argv(out, err, name=name),
-        )
-        for name in jobs
-    ]
+    todo = [TJob(name, mode='mock_argv') for name in ['foo', 'bar']]
     await run(todo)
-
-    outprefix = '{name}/out: '
-    errprefix = '{name}/ERR: '
     assert verify_output(
-        [[(outprefix + out).format(name=name)] for name in jobs],
-        [[(errprefix + err).format(name=name)] for name in jobs],
+        [job.xout() for job in todo], [job.xerr() for job in todo],
     )
 
 
 async def test_decorated_output_from_aborted_processes(
     num_workers, run, verify_output
 ):
-    jobs = ['foo', 'bar', 'baz']
-    out = "This is {name}'s stdout"
-    err = "This is {name}'s stderr"
-
     todo = [
-        TJob(
-            name,
-            decorate=True,
-            subproc=mock_out_err_argv(out, err, sleep=1, name=name),
-        )
-        for name in jobs
+        TJob(name, mode='mock_argv', extras=['sleep:5'])
+        for name in ['foo', 'bar', 'baz']
     ]
     with assert_elapsed_time(lambda t: t < 0.75):
         await run(todo, abort_after=0.5)
 
     # We have 3 jobs, but can only run as many concurrently as there are
-    # workers available. The rest will be cancelled before they start their
-    # subprocess
-    outprefix = '{name}/out: '
-    expect_out = [[(outprefix + out).format(name=name)] for name in jobs]
-    assert verify_output(expect_out[:num_workers], [])
+    # workers available. The rest will be cancelled before they start.
+    assert verify_output(
+        [job.xout() for job in todo][:num_workers],
+        [],  # No stderr output as this happens _after_ the aborted sleep
+    )
 
 
 async def test_decorated_output_from_subprocess_context(run, verify_output):
-    jobs = ['foo', 'bar']
-    out = "This is {name}'s stdout"
-    err = "This is {name}'s stderr"
-
-    async def coro(tjob, ctx):
-        argv = mock_out_err_argv(out, err, name=tjob.name)
-        with tjob.subprocess_xevents(argv, result=0):
+    async def coro(ctx):
+        argv = ctx.tjob.mock_argv()
+        with ctx.tjob.subprocess_xevents(argv, result=0):
             async with ctx.subprocess(argv) as proc:
                 await proc.wait()
 
-    todo = [TJob(name, decorate=True, subproc=coro) for name in jobs]
+    todo = [TJob(name, coro=coro) for name in ['foo', 'bar']]
     await run(todo)
-
-    outprefix = '{name}/out: '
-    errprefix = '{name}/ERR: '
     assert verify_output(
-        [[(outprefix + out).format(name=name)] for name in jobs],
-        [[(errprefix + err).format(name=name)] for name in jobs],
+        [job.xout() for job in todo], [job.xerr() for job in todo],
     )
 
 
 async def test_subproc_decorate_stderr_capture_stdout(run, verify_output):
-    jobs = ['foo', 'bar']
-    out = "This is {name}'s stdout"
-    err = "This is {name}'s stderr"
-
-    async def coro(tjob, ctx):
-        argv = mock_out_err_argv(out, err, name=tjob.name)
-        with tjob.subprocess_xevents(argv):
+    async def coro(ctx):
+        argv = ctx.tjob.mock_argv()
+        with ctx.tjob.subprocess_xevents(argv, result=0):
             async with ctx.subprocess(argv, stdout=PIPE) as proc:
                 output = await proc.stdout.read()
                 await proc.wait()
                 return output
 
-    todo = [TJob(name, decorate=True, subproc=coro) for name in jobs]
+    todo = [TJob(name, coro=coro) for name in ['foo', 'bar']]
     done = await run(todo)
-
-    assert verify_tasks(
-        done,
-        {
-            name: (out + '\n').format(name=name).encode('utf-8')
-            for name in jobs
-        },
+    assert verify_tasks(  # undecorated output was captured and returned
+        done, {job.name: job.out.encode('ascii') for job in todo}
     )
-    assert verify_output(
-        [[] for name in jobs],
-        [[('{name}/ERR: ' + err).format(name=name)] for name in jobs],
-    )
+    assert verify_output([], [job.xerr() for job in todo])  # output captured
 
 
 async def test_subproc_capture_stdout_from_terminated_proc(run, verify_output):
-    jobs = ['foo', 'bar']
-    out = "This is {name}'s stdout"
-    err = "This is {name}'s stderr"
-
-    async def coro(tjob, ctx):
-        argv = mock_out_err_argv(out, err, sleep=30, name=tjob.name)
-        with tjob.subprocess_xevents(argv, result='terminate'):
+    async def coro(ctx):
+        argv = ctx.tjob.mock_argv(['sleep:30'])
+        with ctx.tjob.subprocess_xevents(argv, result='terminate'):
             async with ctx.subprocess(argv, stdout=PIPE) as proc:
                 return await proc.stdout.readline()
                 # Skipping await proc.wait() to provoke termination
 
-    todo = [TJob(name, decorate=True, subproc=coro) for name in jobs]
+    todo = [TJob(name, coro=coro) for name in ['foo', 'bar']]
     done = await run(todo)
-
-    assert verify_tasks(
-        done,
-        {
-            name: (out + '\n').format(name=name).encode('utf-8')
-            for name in jobs
-        },
+    assert verify_tasks(  # undecorated output was captured and returned
+        done, {job.name: job.out.encode('ascii') for job in todo}
     )
-    assert verify_output(
-        [[] for name in jobs],
-        [[] for name in jobs],  # subproc terminated before printing to stderr
-    )
+    assert verify_output([], [])  # subproc terminated before print to stderr
 
 
 # redirected_job() decorator
@@ -446,7 +389,7 @@ async def test_redirected_job_no_decoration(run, verify_output):
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
-        ctx.logger.warning('Logging to stderr')
+        ctx.logger.error('Logging to stderr')
 
     job.name = 'foo'
     await run([job], check_events=False)
@@ -491,7 +434,7 @@ async def test_redirected_job_decorate_err_with_logger(run, verify_output):
 
 async def test_redirected_job_with_decorated_subproc(run, verify_output):
     dec_out, dec_err = decorators('foo')
-    argv = mock_out_err_argv('Printing to stdout', 'Printing to stderr')
+    argv = mock_argv('Printing to stdout', 'err:', 'Printing to stderr')
 
     @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
     async def job(ctx):
@@ -507,7 +450,7 @@ async def test_redirected_job_with_decorated_subproc(run, verify_output):
 
 async def test_redirected_job_with_subproc_output_capture(run, verify_output):
     dec_out, dec_err = decorators('foo')
-    argv = mock_out_err_argv('Printing to stdout', 'Printing to stderr')
+    argv = mock_argv('Printing to stdout', 'err:', 'Printing to stderr')
 
     @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
     async def job(ctx):
@@ -518,103 +461,46 @@ async def test_redirected_job_with_subproc_output_capture(run, verify_output):
 
     job.name = 'foo'
     done = await run([job], check_events=False)
-    assert verify_tasks(done, {'foo': b'Printing to stdout\n'})
-    assert verify_output([[]], [['foo/ERR: Printing to stderr']],)
+    assert verify_tasks(done, {'foo': b'Printing to stdout\n'})  # undecorated
+    assert verify_output([[]], [['foo/ERR: Printing to stderr']])
 
 
 # stress-testing the logmux framework
 
 
 async def test_decorated_output_from_100_jobs(run, verify_output):
-    out = "This is {i}'s stdout"
-    err = "This is {i}'s stderr"
-
-    todo = [
-        TJob(
-            f'job #{i}',
-            out=out.format(i=i),
-            err=err.format(i=i),
-            decorate=True,
-        )
-        for i in range(100)
-    ]
+    todo = [TJob(f'job #{i}') for i in range(100)]
     await run(todo)
-
-    outprefix = 'job #{i}/out: '
-    errprefix = 'job #{i}/ERR: '
     assert verify_output(
-        [[(outprefix + out).format(i=i)] for i in range(100)],
-        [[(errprefix + err).format(i=i)] for i in range(100)],
+        [job.xout() for job in todo], [job.xerr() for job in todo],
     )
 
 
 async def test_decorated_output_from_100_spawned_jobs(run, verify_output):
-    out = "This is {i}'s stdout"
-    err = "This is {i}'s stderr"
-
     todo = TJob(
         'foo',
-        spawn=[
-            TJob(
-                f'job #{i}',
-                out=out.format(i=i),
-                err=err.format(i=i),
-                decorate=True,
-            )
-            for i in range(100)
-        ],
+        out='',
+        err='',
+        decorate=False,
+        spawn=[TJob(f'job #{i}') for i in range(100)],
     )
     await run([todo])
-
-    outprefix = 'job #{i}/out: '
-    errprefix = 'job #{i}/ERR: '
     assert verify_output(
-        [[(outprefix + out).format(i=i)] for i in range(100)],
-        [[(errprefix + err).format(i=i)] for i in range(100)],
+        [job.xout() for job in todo.spawn], [job.xerr() for job in todo.spawn],
     )
 
 
 async def test_decorated_output_from_100_thread_workers(run, verify_output):
-    out = "This is {i}'s stdout"
-    err = "This is {i}'s stderr"
-
-    todo = [
-        TJob(
-            f'job #{i}',
-            out=out.format(i=i),
-            err=err.format(i=i),
-            decorate=True,
-            in_thread=True,
-        )
-        for i in range(100)
-    ]
+    todo = [TJob(f'job #{i}', mode='thread') for i in range(100)]
     await run(todo)
-
-    outprefix = 'job #{i}/out: '
-    errprefix = 'job #{i}/ERR: '
     assert verify_output(
-        [[(outprefix + out).format(i=i)] for i in range(100)],
-        [[(errprefix + err).format(i=i)] for i in range(100)],
+        [job.xout() for job in todo], [job.xerr() for job in todo],
     )
 
 
 async def test_decorated_output_from_100_subprocesses(run, verify_output):
-    out = "This is {i}'s stdout"
-    err = "This is {i}'s stderr"
-
-    todo = [
-        TJob(
-            f'job #{i}',
-            decorate=True,
-            subproc=mock_out_err_argv(out, err, i=i),
-        )
-        for i in range(100)
-    ]
+    todo = [TJob(f'job #{i}', mode='mock_argv') for i in range(100)]
     await run(todo)
-
-    outprefix = 'job #{i}/out: '
-    errprefix = 'job #{i}/ERR: '
     assert verify_output(
-        [[(outprefix + out).format(i=i)] for i in range(100)],
-        [[(errprefix + err).format(i=i)] for i in range(100)],
+        [job.xout() for job in todo], [job.xerr() for job in todo],
     )
