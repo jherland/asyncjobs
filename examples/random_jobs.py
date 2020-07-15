@@ -25,13 +25,13 @@ class TimeWaster:
         return f'{self.name} ({deps})'
 
     async def __call__(self, ctx):
-        ctx.logger.info(self)
+        logger.info(f'{str(self):>32}')
         return await ctx.call_in_thread(self.do_work, ctx)
 
     def do_work(self, ctx):
-        ctx.logger.info(f'Doing own work: {self.work}')
+        logger.info(f'{str(self):>32} Doing own work: {self.work}')
         time.sleep(self.work / 1000)
-        ctx.logger.info(f'Finished own work: {self.work}')
+        logger.info(f'{str(self):>32} Finished own work: {self.work}')
         return {self.name: self.work}
 
 
@@ -68,7 +68,7 @@ class RandomJob(TimeWaster):
                 self.work_threshold * 2 // 3, self.work_threshold
             )
             name = f'{self.name}_{i}/{work}'
-            ctx.logger.info(f'Splitting off {name}')
+            logger.info(f'{str(self):>32} Splitting off {name}')
             job = TimeWaster(name=name, work=work)
             ctx.add_job(job.name, job)
             self.deps.add(name)
@@ -77,12 +77,12 @@ class RandomJob(TimeWaster):
 
     def do_work(self, ctx):
         result = {}
-        ctx.logger.info('From deps:')
+        logger.info(f'{str(self):>32} From deps:')
         for dep, dep_result in ctx.deps.items():
-            ctx.logger.info(f'  {dep}: {dep_result}')
+            logger.info(f'{" "*32}   {dep}: {dep_result}')
             result.update(dep_result)
         result.update(super().do_work(ctx))
-        ctx.logger.info(f'Returning {result}')
+        logger.info(f'{str(self):>32} Returning {result}')
         return result
 
 

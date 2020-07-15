@@ -498,7 +498,7 @@ async def test_redirected_job_with_no_decoration(run, verify_output):
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
-        ctx.logger.error('Logging to stderr')
+        logger.error('Logging to stderr')
 
     job.name = 'foo'
     await run([job], check_events=False)
@@ -515,7 +515,7 @@ async def test_redirected_and_decorated_job_except_logger(run, verify_output):
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
-        ctx.logger.error('Logging to stderr')
+        logger.error('Logging to stderr')
 
     job.name = 'foo'
     await run([job], check_events=False)
@@ -525,23 +525,6 @@ async def test_redirected_and_decorated_job_except_logger(run, verify_output):
 
 
 async def test_redirected_and_decorated_job_include_logger(run, verify_output):
-    _, dec_err = decorators('foo')
-
-    @logmuxed_work.redirected_job(decorate_err=dec_err)
-    async def job(ctx):
-        print('Printing to stdout', file=ctx.stdout)
-        print('Printing to stderr', file=ctx.stderr)
-        ctx.logger.error('Logging to stderr')
-
-    job.name = 'foo'
-    await run([job], check_events=False)
-    assert verify_output(
-        [['Printing to stdout']],
-        [['foo/ERR: Printing to stderr', 'foo/ERR: Logging to stderr']],
-    )
-
-
-async def test_redirected_job_decorate_err_with_ext_logger(run, verify_output):
     _, dec_err = decorators('foo')
 
     @logmuxed_work.redirected_job(decorate_err=dec_err)

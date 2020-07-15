@@ -35,22 +35,22 @@ class Context(basic.Context):
                 )
             )
         self._workers_in_use += 1
-        self.logger.debug('-> acquiring worker semaphore…')
+        logger.debug('-> acquiring worker semaphore…')
         self.event('await worker slot')
         async with self._scheduler.worker_semaphore:
             self.event('awaited worker slot')
-            self.logger.debug('-- acquired worker semaphore')
+            logger.debug('-- acquired worker semaphore')
             try:
                 yield
             finally:
-                self.logger.debug('<- releasing worker semaphore')
+                logger.debug('<- releasing worker semaphore')
                 self._workers_in_use -= 1
 
     async def call_in_thread(self, func, *args):
         """Call func(*args) in a worker thread and await its result."""
         async with self.reserve_worker():
             try:
-                self.logger.debug(f'-> starting {func} in worker thread…')
+                logger.debug(f'-> starting {func} in worker thread…')
                 self.event('start work in thread', func=str(func))
                 future = self._scheduler._start_in_thread(func, *args)
                 future.add_done_callback(
@@ -59,12 +59,12 @@ class Context(basic.Context):
                         fate=self._scheduler._fate(fut),
                     )
                 )
-                self.logger.debug('-- awaiting worker thread…')
+                logger.debug('-- awaiting worker thread…')
                 result = await future
-                self.logger.debug(f'<- {result!r} from worker')
+                logger.debug(f'<- {result!r} from worker')
                 return result
             except Exception as e:
-                self.logger.warning(f'<- Exception {e!r} from worker!')
+                logger.warning(f'<- Exception {e!r} from worker!')
                 raise
 
     async def terminate_subprocess(self, proc, argv, delay, *, kill=False):
@@ -72,7 +72,7 @@ class Context(basic.Context):
             return
 
         verb = 'kill' if kill else 'terminate'
-        self.logger.warning(f'{proc} is still alive, {verb}…')
+        logger.warning(f'{proc} is still alive, {verb}…')
         self.event(f'subprocess {verb}', argv=argv, pid=proc.pid)
         with contextlib.suppress(ProcessLookupError):
             if kill:
@@ -81,7 +81,7 @@ class Context(basic.Context):
                 proc.terminate()
         try:
             await asyncio.wait_for(proc.wait(), delay)
-            self.logger.debug(f'{proc} {verb} done.')
+            logger.debug(f'{proc} {verb} done.')
         except asyncio.TimeoutError as e:
             # Reinstate the previous exception/return that caused this
             if e.__context__ is not None:
@@ -110,14 +110,14 @@ class Context(basic.Context):
         code is not considered exceptional.
         """
         async with self.reserve_worker():
-            self.logger.debug(f'-> start {argv} in subprocess…')
+            logger.debug(f'-> start {argv} in subprocess…')
             self.event('start work in subprocess', argv=argv)
             proc = await asyncio.create_subprocess_exec(*argv, **kwargs)
             try:
-                self.logger.debug(f'-- enter subprocess context for {argv}…')
+                logger.debug(f'-- enter subprocess context for {argv}…')
                 yield proc
             finally:
-                self.logger.debug(f'-- exit subprocess context for {argv}…')
+                logger.debug(f'-- exit subprocess context for {argv}…')
                 try:
                     if proc.returncode is None:  # still running
                         await self.terminate_subprocess(proc, argv, kill_delay)
@@ -132,9 +132,9 @@ class Context(basic.Context):
     async def run_in_subprocess(self, argv, **kwargs):
         """Run a command line in a subprocess and await its exit code."""
         async with self.subprocess(argv, **kwargs) as proc:
-            self.logger.debug('-- awaiting subprocess…')
+            logger.debug('-- awaiting subprocess…')
             await proc.wait()
-            self.logger.debug('-- awaited subprocess…')
+            logger.debug('-- awaited subprocess…')
             return proc.returncode
 
 

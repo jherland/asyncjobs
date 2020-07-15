@@ -80,7 +80,6 @@ class Context:
 
     def __init__(self, name, scheduler):
         self.name = name
-        self.logger = logging.getLogger(name)
         self.deps = None  # set by the coroutine wrapper in Scheduler.add_job()
         self._scheduler = scheduler
 
@@ -103,14 +102,14 @@ class Context:
         pending = [n for n, t in zip(job_names, tasks) if not t.done()]
         self.event('await results', jobs=list(job_names), pending=pending)
         if pending:
-            self.logger.debug(f'waiting for {", ".join(pending)}…')
+            logger.debug(f'waiting for {", ".join(pending)}…')
         try:
             results = dict(zip(job_names, await asyncio.gather(*tasks)))
         except Exception:
-            self.logger.info('Cancelled due to failed dependency')
+            logger.info('Cancelled due to failed dependency')
             raise asyncio.CancelledError
         self.event('awaited results')
-        self.logger.debug(f'Returning {results} from .results()')
+        logger.debug(f'Returning {results} from .results()')
         return results
 
     def add_job(self, name, coro, deps=None):
@@ -196,7 +195,7 @@ class Scheduler:
 
             async def deps_before_coro(ctx, wrapped_coro=coro):
                 assert ctx.deps is None
-                ctx.logger.debug(f'Awaiting dependencies: {deps}…')
+                logger.debug(f'Awaiting dependencies: {deps}…')
                 ctx.deps = await ctx.results(*deps)
                 return await wrapped_coro(ctx)
 

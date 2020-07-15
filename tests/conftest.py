@@ -113,13 +113,13 @@ class TBasicJob:
         dep_results = ctx.deps
         if self.deps:
             self.xevents.add('awaited results')
-        ctx.logger.debug(f'Results from deps: {dep_results}')
+        logger.debug(f'Results from deps: {dep_results}')
 
         # Sleep, if requested
         if self.async_sleep:
-            ctx.logger.info(f'Async sleep for {self.async_sleep} seconds…')
+            logger.info(f'Async sleep for {self.async_sleep} seconds…')
             await asyncio.sleep(self.async_sleep)
-            ctx.logger.info('Finished async sleep')
+            logger.info('Finished async sleep')
 
         # Do the scheduled work
         if self.coro is not None:
@@ -129,11 +129,11 @@ class TBasicJob:
                 assert asyncio.iscoroutine(coro), f'not a coroutine: {coro}'
                 self.result = await coro
             except asyncio.CancelledError:
-                ctx.logger.info('Cancelled!')
+                logger.info('Cancelled!')
                 self.xevents.add('finish', fate='cancelled')
                 raise
             except Exception as e:
-                ctx.logger.info(f'Raising exception: {e!r}')
+                logger.info(f'Raising exception: {e!r}')
                 traceback.print_exc()
                 self.xevents.add('finish', fate='failed')
                 raise
@@ -155,11 +155,11 @@ class TBasicJob:
 
         # Return result or raise exception
         if isinstance(self.result, Exception):
-            ctx.logger.info(f'Raising exception: {self.result!r}')
+            logger.info(f'Raising exception: {self.result!r}')
             self.xevents.add('finish', fate='failed')
             raise self.result
         else:
-            ctx.logger.info(f'Returning result: {self.result!r}')
+            logger.info(f'Returning result: {self.result!r}')
             self.xevents.add('finish', fate='success')
             return self.result
 
