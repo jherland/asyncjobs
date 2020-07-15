@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import functools
+import logging
 import pytest
 import random
 from subprocess import PIPE
@@ -12,6 +13,7 @@ from asyncjobs import logmux, logmuxed_work, signal_handling
 from conftest import (
     abort_in,
     assert_elapsed_time,
+    ListHandler,
     mock_argv,
     TExternalWorkJob,
     verified_events,
@@ -19,6 +21,8 @@ from conftest import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+logger = logging.getLogger(__name__)
 
 
 def shuffled_prints(out_f, err_f, out_strings, err_strings):
@@ -80,6 +84,7 @@ class TJob(TExternalWorkJob):
         mode=None,
         out=None,
         err=None,
+        log=None,
         decorate=True,
         log_handler=False,
         extras=None,
@@ -93,15 +98,39 @@ class TJob(TExternalWorkJob):
             'mock_argv': self.do_mock_argv,
             'custom': self.coro,
         }
-        self.coro = Modes[mode or ('async' if self.coro is None else 'custom')]
+        if mode is None:
+            mode = 'async' if self.coro is None else 'custom'
+        self.coro = Modes[mode]
 
         self.out = f"This is {self.name}'s stdout\n" if out is None else out
         self.err = f"This is {self.name}'s stderr\n" if err is None else err
+        self.log = f"This is {self.name}'s log" if log is None else log
         self.decorate = decorate
         self.log_handler = log_handler
         self.extras = extras
 
+        # We expect any log messages to ctx.stderr in the following cases:
+        # - The default log handler (log_handler=True) streams to ctx.stderr.
+        # - subprocesses log to stderr which is always == ctx.stderr.
+        # - When mode == 'custom' we _assume_ the user's coroutine arranges
+        #   for logging to ctx.stderr.
+        self.logs_to_stderr = log_handler is True or mode in {
+            'mock_argv',
+            'custom',
+        }
+
     async def __call__(self, ctx):
+        # Limit log handlers to ERROR messages only, so that we can ignore
+        # less critical log records in the below tests
+        old_factory = ctx.log_handler_factory
+
+        def only_errors(ctx):
+            handler = old_factory(ctx)
+            handler.setLevel(logging.ERROR)
+            return handler
+
+        ctx.log_handler_factory = only_errors
+
         if self.decorate:
             dec_out, dec_err = decorators(self.name)
         else:
@@ -124,10 +153,11 @@ class TJob(TExternalWorkJob):
     def xerr(self):
         """Return expected stderr data from this job."""
         dec = decorators(self.name)[1] if self.decorate else lambda s: s
+        logs = [dec(self.log)] if self.log and self.logs_to_stderr else []
         if isinstance(self.err, list):
-            return [dec(line + '\n').rstrip() for line in self.err]
+            return [dec(line + '\n').rstrip() for line in self.err] + logs
         else:
-            return [dec(self.err).rstrip()]
+            return [dec(self.err).rstrip()] + logs
 
     def shuffled_out_err(self, out_f, err_f):
         if isinstance(self.out, list):  # lines from list of strings
@@ -149,6 +179,8 @@ class TJob(TExternalWorkJob):
             if not arg.startswith('exit:'):
                 args.append(arg)
         args += ['err:', self.err.rstrip()]
+        if self.log:
+            args.append(f'log:{self.log}')
         for arg in extra_args or []:
             if arg.startswith('exit:'):
                 args.append(arg)
@@ -158,14 +190,20 @@ class TJob(TExternalWorkJob):
         for print_one in self.shuffled_out_err(ctx.stdout, ctx.stderr):
             print_one()
             await asyncio.sleep(0)
+        if self.log:
+            logger.error(self.log)
 
     async def do_thread(self, ctx):
         def in_thread(ctx):
             for print_one in self.shuffled_out_err(ctx.stdout, ctx.stderr):
                 print_one()
                 time.sleep(0.001)
+            if self.log:
+                logger.error(self.log)
 
-        return await self.run_thread(in_thread, ctx)
+        return await self.run_thread(
+            in_thread, ctx, log_handler=self.log_handler
+        )
 
     async def do_mock_argv(self, ctx):
         return await self.run_subprocess(self.mock_argv(self.extras), ctx)
@@ -243,6 +281,16 @@ async def test_undecorated_linewise_output_from_two_jobs(run, verify_output):
     )
 
 
+async def test_undecorated_output_with_log_from_two_jobs(run, verify_output):
+    todo = [
+        TJob(name, decorate=False, log_handler=True) for name in ['foo', 'bar']
+    ]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+
+
 # decorated output
 
 
@@ -276,8 +324,16 @@ async def test_decorated_linewise_output_from_two_jobs(run, verify_output):
     )
 
 
+async def test_decorated_output_with_log_from_two_jobs(run, verify_output):
+    todo = [TJob(name, log_handler=True) for name in ['foo', 'bar']]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+
+
 async def test_decorated_output_via_custom_muxes(run, verify_output):
-    todo = [TJob(name) for name in ['foo', 'bar']]
+    todo = [TJob(name, log_handler=True) for name in ['foo', 'bar']]
     to_stdout = logmux.LogMux(sys.stdout)
     to_stderr = logmux.LogMux(sys.stderr)
     await run(todo, outmux=to_stderr, errmux=to_stdout)  # flip stderr/stdout
@@ -286,10 +342,20 @@ async def test_decorated_output_via_custom_muxes(run, verify_output):
     )
 
 
+async def test_decorated_output_with_custom_log_handler(run, verify_output):
+    test_handler = ListHandler(level=logging.ERROR)
+    todo = [TJob(name, log_handler=test_handler) for name in ['foo', 'bar']]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+    assert sorted(test_handler.messages()) == sorted(job.log for job in todo)
+
+
 async def test_decorated_output_from_spawned_jobs(run, verify_output):
-    baz = TJob('baz')
-    bar = TJob('bar', spawn=[baz])
-    foo = TJob('foo', spawn=[bar])
+    baz = TJob('baz', log_handler=True)
+    bar = TJob('bar', log_handler=True, spawn=[baz])
+    foo = TJob('foo', log_handler=True, spawn=[bar])
     await run([foo])
     assert verify_output(
         [job.xout() for job in [foo, bar, baz]],
@@ -297,12 +363,55 @@ async def test_decorated_output_from_spawned_jobs(run, verify_output):
     )
 
 
-async def test_decorated_output_from_thread_worker(run, verify_output):
+async def test_decorated_output_from_spawned_w_custom_log(run, verify_output):
+    foo_handler = ListHandler(level=logging.ERROR)
+    bar_handler = ListHandler(level=logging.ERROR)
+    baz_handler = ListHandler(level=logging.ERROR)
+    baz = TJob('baz', log_handler=baz_handler)
+    bar = TJob('bar', log_handler=bar_handler, spawn=[baz])
+    foo = TJob('foo', log_handler=foo_handler, spawn=[bar])
+    await run([foo])
+    assert verify_output(
+        [job.xout() for job in [foo, bar, baz]],
+        [job.xerr() for job in [foo, bar, baz]],
+    )
+    assert list(foo_handler.messages()) == [foo.log]
+    assert list(bar_handler.messages()) == [bar.log]
+    assert list(baz_handler.messages()) == [baz.log]
+
+
+# decorated output from threads
+
+
+async def test_decorated_output_from_thread(run, verify_output):
     todo = [TJob(name, mode='thread') for name in ['foo', 'bar']]
     await run(todo)
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
+
+
+async def test_decorated_output_with_log_from_thread(run, verify_output):
+    todo = [
+        TJob(name, mode='thread', log_handler=True) for name in ['foo', 'bar']
+    ]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+
+
+async def test_decorated_output_from_thread_w_custom_log(run, verify_output):
+    test_handler = ListHandler(level=logging.ERROR)
+    todo = [
+        TJob(name, mode='thread', log_handler=test_handler)
+        for name in ['foo', 'bar']
+    ]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+    assert sorted(test_handler.messages()) == sorted(job.log for job in todo)
 
 
 # decorated output from subprocesses
@@ -384,7 +493,7 @@ async def test_subproc_capture_stdout_from_terminated_proc(run, verify_output):
 # redirected_job() decorator
 
 
-async def test_redirected_job_no_decoration(run, verify_output):
+async def test_redirected_job_with_no_decoration(run, verify_output):
     @logmuxed_work.redirected_job()
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
@@ -399,14 +508,14 @@ async def test_redirected_job_no_decoration(run, verify_output):
     )
 
 
-async def test_redirected_job_decorate_without_logger(run, verify_output):
+async def test_redirected_and_decorated_job_except_logger(run, verify_output):
     dec_out, dec_err = decorators('foo')
 
     @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
-        ctx.logger.warning('Logging to stderr')
+        ctx.logger.error('Logging to stderr')
 
     job.name = 'foo'
     await run([job], check_events=False)
@@ -415,14 +524,31 @@ async def test_redirected_job_decorate_without_logger(run, verify_output):
     )
 
 
-async def test_redirected_job_decorate_err_with_logger(run, verify_output):
+async def test_redirected_and_decorated_job_include_logger(run, verify_output):
     _, dec_err = decorators('foo')
 
     @logmuxed_work.redirected_job(decorate_err=dec_err)
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
-        ctx.logger.warning('Logging to stderr')
+        ctx.logger.error('Logging to stderr')
+
+    job.name = 'foo'
+    await run([job], check_events=False)
+    assert verify_output(
+        [['Printing to stdout']],
+        [['foo/ERR: Printing to stderr', 'foo/ERR: Logging to stderr']],
+    )
+
+
+async def test_redirected_job_decorate_err_with_ext_logger(run, verify_output):
+    _, dec_err = decorators('foo')
+
+    @logmuxed_work.redirected_job(decorate_err=dec_err)
+    async def job(ctx):
+        print('Printing to stdout', file=ctx.stdout)
+        print('Printing to stderr', file=ctx.stderr)
+        logger.error('Logging to stderr')
 
     job.name = 'foo'
     await run([job], check_events=False)
@@ -434,7 +560,9 @@ async def test_redirected_job_decorate_err_with_logger(run, verify_output):
 
 async def test_redirected_job_with_decorated_subproc(run, verify_output):
     dec_out, dec_err = decorators('foo')
-    argv = mock_argv('Printing to stdout', 'err:', 'Printing to stderr')
+    argv = mock_argv(
+        'Printing to stdout', 'err:', 'Printing to stderr', 'log:Logging!'
+    )
 
     @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
     async def job(ctx):
@@ -444,13 +572,16 @@ async def test_redirected_job_with_decorated_subproc(run, verify_output):
     job.name = 'foo'
     await run([job], check_events=False)
     assert verify_output(
-        [['foo/out: Printing to stdout']], [['foo/ERR: Printing to stderr']],
+        [['foo/out: Printing to stdout']],
+        [['foo/ERR: Printing to stderr', 'foo/ERR: Logging!']],
     )
 
 
 async def test_redirected_job_with_subproc_output_capture(run, verify_output):
     dec_out, dec_err = decorators('foo')
-    argv = mock_argv('Printing to stdout', 'err:', 'Printing to stderr')
+    argv = mock_argv(
+        'Printing to stdout', 'err:', 'Printing to stderr', 'log:Logging!'
+    )
 
     @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
     async def job(ctx):
@@ -462,7 +593,9 @@ async def test_redirected_job_with_subproc_output_capture(run, verify_output):
     job.name = 'foo'
     done = await run([job], check_events=False)
     assert verify_tasks(done, {'foo': b'Printing to stdout\n'})  # undecorated
-    assert verify_output([[]], [['foo/ERR: Printing to stderr']])
+    assert verify_output(
+        [[]], [['foo/ERR: Printing to stderr', 'foo/ERR: Logging!']]
+    )
 
 
 # stress-testing the logmux framework
@@ -483,8 +616,7 @@ async def test_decorated_output_from_many_spawned_jobs(
         'foo',
         out='',
         err='',
-        decorate=False,
-        spawn=[TJob(f'job #{i}') for i in range(num_jobs)],
+        spawn=[TJob(f'job #{i}', log_handler=True) for i in range(num_jobs)],
     )
     await run([todo])
     assert verify_output(

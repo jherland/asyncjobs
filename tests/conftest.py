@@ -176,9 +176,9 @@ class TExternalWorkJob(TBasicJob):
             assert thread is None and self.coro is None
             self.coro = partial(self.run_subprocess, argv)
 
-    async def run_thread(self, thread, ctx):
+    async def run_thread(self, thread, ctx, **kwargs):
         with self.thread_xevents():
-            return await ctx.call_in_thread(thread, ctx)
+            return await ctx.call_in_thread(thread, ctx, **kwargs)
 
     async def run_subprocess(self, argv, ctx):
         with self.subprocess_xevents(argv, may_cancel=True):

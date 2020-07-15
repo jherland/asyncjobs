@@ -4,7 +4,7 @@ import functools
 import logging
 import sys
 
-from . import external_work, logmux
+from . import external_work, logcontext, logmux
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def redirected_job(decorate_out=None, decorate_err=None, log_handler=True):
     """Setup stdout/stderr redirection for the given coroutine.
 
-    This is the same as wrapping the entire corouting in:
+    This is the same as wrapping the entire coroutine in:
 
         async with ctx.redirect(...):
             ...
@@ -59,10 +59,25 @@ class Context(external_work.Context):
     redirected to self.stdout/self.stderr manually.)
     """
 
+    @staticmethod
+    def default_log_handler_factory(ctx):
+        return logging.StreamHandler(ctx.stderr)
+
     def __init__(self, *args):
         super().__init__(*args)
         self.stdout = None
         self.stderr = None
+        self.log_handler_factory = self.default_log_handler_factory
+
+    @contextlib.contextmanager
+    def _log_context(self, handler):
+        if handler is True:
+            handler = self.log_handler_factory(self)
+        elif handler is False:
+            handler = None
+        assert handler is None or isinstance(handler, logging.Handler)
+        with self._scheduler.log_demuxer.context_handler(handler):
+            yield handler
 
     @contextlib.asynccontextmanager
     async def redirect(
@@ -72,17 +87,22 @@ class Context(external_work.Context):
             async with self._scheduler.errmux.new_stream(decorate_err) as errf:
                 self.stdout = outf
                 self.stderr = errf
-                if log_handler is True:
-                    log_handler = logging.StreamHandler(self.stderr)
-                if log_handler:
-                    self.logger.addHandler(log_handler)
                 try:
-                    yield
+                    with self._log_context(log_handler):
+                        yield
                 finally:
-                    if log_handler:
-                        self.logger.removeHandler(log_handler)
                     self.stdout = None
                     self.stderr = None
+
+    async def call_in_thread(self, func, *args, log_handler=True):
+        """Call func(*args) in a worker thread and await its result."""
+
+        @functools.wraps(func)
+        def func_wrapped_in_log_context(*args):
+            with self._log_context(log_handler):
+                return func(*args)
+
+        return await super().call_in_thread(func_wrapped_in_log_context, *args)
 
     @contextlib.asynccontextmanager
     async def subprocess(self, argv, **kwargs):
@@ -107,10 +127,17 @@ class Scheduler(external_work.Scheduler):
     """
 
     def __init__(
-        self, *, outmux=None, errmux=None, context_class=Context, **kwargs
+        self,
+        *,
+        outmux=None,
+        errmux=None,
+        log_demuxer=None,
+        context_class=Context,
+        **kwargs,
     ):
         self.outmux = outmux
         self.errmux = errmux
+        self.log_demuxer = log_demuxer
 
         assert issubclass(context_class, Context)
         super().__init__(context_class=context_class, **kwargs)
@@ -118,10 +145,15 @@ class Scheduler(external_work.Scheduler):
     async def _run_tasks(self, *args, **kwargs):
         if self.outmux is None:
             self.outmux = logmux.LogMux(sys.stdout)
+        assert asyncio.get_running_loop() is self.outmux.q._loop
         if self.errmux is None:
             self.errmux = logmux.LogMux(sys.stderr)
-        assert asyncio.get_running_loop() is self.outmux.q._loop
         assert asyncio.get_running_loop() is self.errmux.q._loop
+        if self.log_demuxer is None:
+            self.log_demuxer = logcontext.LogContextDemuxer()
+        assert isinstance(self.log_demuxer, logcontext.LogContextDemuxer)
+
         logger.debug('Starting LogMux instances…')
         async with self.outmux, self.errmux:
-            await super()._run_tasks(*args, **kwargs)
+            with self.log_demuxer.installed():
+                await super()._run_tasks(*args, **kwargs)
