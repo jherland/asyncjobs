@@ -290,6 +290,24 @@ class TExternalWorkJob(TBasicJob):
         return result
 
 
+class ListHandler(logging.Handler):
+    """A log handler implementation that simply stores log records in a list.
+
+    Used to test that log records are dispatched correctly by the demuxer.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+    def messages(self):
+        for record in self.records:
+            yield record.msg
+
+
 @pytest.fixture(params=[1, 2, 4, 100])
 def num_workers(request):
     return request.param
