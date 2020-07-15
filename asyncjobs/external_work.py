@@ -155,9 +155,9 @@ class Scheduler(basic.Scheduler):
         assert issubclass(context_class, Context)
         super().__init__(context_class=context_class, **kwargs)
 
-    def add_thread_job(self, name, func, *args, deps=None):
+    def add_thread_job(self, name, func, *args, deps=None, **kwargs):
         async def coro(ctx):
-            return await ctx.call_in_thread(func, *args)
+            return await ctx.call_in_thread(func, *args, **kwargs)
 
         return self.add_job(name, coro, deps)
 
