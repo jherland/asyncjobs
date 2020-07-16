@@ -2,10 +2,13 @@
 """Helper program to simulate various subprocess behaviors."""
 
 import os
+import logging
 from pathlib import Path
 import signal
 import sys
 import time
+
+logger = logging.getLogger('subprocess_helper')
 
 
 def main(args):
@@ -25,6 +28,8 @@ def main(args):
             time.sleep(float(arg[6:]))
         elif arg.startswith('touch:'):
             Path(arg[6:]).touch()
+        elif arg.startswith('log:'):
+            logger.error(arg[4:])
         elif arg.startswith('ignore:'):
             signal.signal(getattr(signal, arg[7:]), signal.SIG_IGN)
         elif arg.startswith('exit:'):
