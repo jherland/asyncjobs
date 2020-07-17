@@ -103,11 +103,11 @@ async def test_one_bytewise_stream_with_garbage(tmp_path):
         b'last line without newline',
     ]
     bytestring = b'\n'.join(lines)
-    with output.open('w', errors='surrogateescape') as out:
+    with output.open('w', encoding='utf-8', errors='surrogateescape') as out:
         async with LogMux(out) as logmux:
             async with logmux.new_stream(lambda s: f'❰{s.rstrip()}❱\n') as f:
                 f.buffer.write(bytestring)
-    actual = output.read_text(errors='surrogateescape')
+    actual = output.read_text(encoding='utf-8', errors='surrogateescape')
     expect_lines = [
         '❰first line...❱',
         '❰latin-1: \udcc6\udcd8\udcc5...❱',
