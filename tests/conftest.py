@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import signal
 from subprocess import CalledProcessError
+import sys
 import time
 import traceback
 
@@ -304,7 +305,7 @@ def scheduler_with_workers(num_workers):
 
 def mock_argv(*args):
     mock_path = Path(__file__).parent / 'subprocess_helper.py'
-    return [str(mock_path)] + list(args)
+    return [sys.executable, '-u', str(mock_path)] + list(args)
 
 
 @contextmanager
