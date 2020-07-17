@@ -1,4 +1,5 @@
 import nox
+import sys
 
 # Run everything but 'dist' by default
 nox.options.keywords = "not dist"
@@ -6,8 +7,12 @@ nox.options.keywords = "not dist"
 
 @nox.session(python=["3.6", "3.7", "3.8", "3.9"])
 def tests(session):
+    env = None
+    if session.python == "3.6":
+        if not sys.stdout.encoding.lower().startswith('utf'):
+            env = {"PYTHONIOENCODING": "UTF8"}
     session.install(".[test]")
-    session.run("pytest", "-x", "--log-level=debug", *session.posargs)
+    session.run("pytest", "-x", "--log-level=debug", *session.posargs, env=env)
 
 
 @nox.session
