@@ -92,7 +92,10 @@ class LogMux:
                     line = f.readline()
                     if not line:
                         break
-                    self.out.write(decorator(line))
+                    try:
+                        self.out.write(decorator(line))
+                    except Exception as e:
+                        logger.error(f'Ignored exception: {e!r}')
 
             def watch(self, path, decorator=None):
                 logger.debug(f'Watching {path}')
