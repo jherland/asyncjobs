@@ -468,21 +468,23 @@ async def test_redirected_job_with_subproc_output_capture(run, verify_output):
 # stress-testing the logmux framework
 
 
-async def test_decorated_output_from_100_jobs(run, verify_output):
-    todo = [TJob(f'job #{i}') for i in range(100)]
+async def test_decorated_output_from_many_jobs(num_jobs, run, verify_output):
+    todo = [TJob(f'job #{i}') for i in range(num_jobs)]
     await run(todo)
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
 
 
-async def test_decorated_output_from_100_spawned_jobs(run, verify_output):
+async def test_decorated_output_from_many_spawned_jobs(
+    num_jobs, run, verify_output
+):
     todo = TJob(
         'foo',
         out='',
         err='',
         decorate=False,
-        spawn=[TJob(f'job #{i}') for i in range(100)],
+        spawn=[TJob(f'job #{i}') for i in range(num_jobs)],
     )
     await run([todo])
     assert verify_output(
@@ -490,16 +492,20 @@ async def test_decorated_output_from_100_spawned_jobs(run, verify_output):
     )
 
 
-async def test_decorated_output_from_100_thread_workers(run, verify_output):
-    todo = [TJob(f'job #{i}', mode='thread') for i in range(100)]
+async def test_decorated_output_from_many_thread_workers(
+    num_jobs, run, verify_output
+):
+    todo = [TJob(f'job #{i}', mode='thread') for i in range(num_jobs)]
     await run(todo)
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
 
 
-async def test_decorated_output_from_100_subprocesses(run, verify_output):
-    todo = [TJob(f'job #{i}', mode='mock_argv') for i in range(100)]
+async def test_decorated_output_from_many_subprocesses(
+    num_jobs, run, verify_output
+):
+    todo = [TJob(f'job #{i}', mode='mock_argv') for i in range(num_jobs)]
     await run(todo)
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],

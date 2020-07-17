@@ -285,6 +285,12 @@ def num_workers(request):
 
 
 @pytest.fixture
+def num_jobs(num_workers):
+    """How many jobs to run in stress tests."""
+    return min(100, num_workers * 10)
+
+
+@pytest.fixture
 def scheduler_with_workers(num_workers):
     def make_scheduler_class(*bases):
         class _Scheduler(*bases):
