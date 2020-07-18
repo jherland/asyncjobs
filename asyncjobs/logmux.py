@@ -91,17 +91,18 @@ class LogMux:
             def __init__(self, q, out):
                 self.q = q
                 self.out = out
-                self.paths = {}  # map path -> (f, decorator)
+                self.paths = {}  # map path -> (f, decorator, buffer)
                 self.running = False
                 self.loop = asyncio.get_running_loop()
 
-            def _do_read(self, f, decorator):
-                while True:
-                    line = f.readline()
-                    if not line:
-                        break
+            def _do_read(self, f, decorator, buffer, *, last=False):
+                *lines, buffer[0] = (buffer[0] + f.read()).split('\n')
+                if last and buffer[0]:  # no newline at end of file
+                    lines.append(buffer[0])
+                    buffer[0] = ''
+                for line in lines:
                     try:
-                        self.out.write(decorator(line))
+                        self.out.write(decorator(line + '\n'))
                     except Exception as e:
                         logger.error(f'Ignored exception: {e!r}')
 
@@ -113,15 +114,18 @@ class LogMux:
                     mode='r',
                     errors='surrogateescape',
                 )
-                self.loop.add_reader(f, self._do_read, f, decorator)
-                self.paths[path] = f, decorator
+                buffer = ['']  # _do_read() needs buffer to be mutable
+                self.paths[path] = f, decorator, buffer
+                self.loop.add_reader(f, self._do_read, f, decorator, buffer)
 
             def unwatch(self, path):
                 logger.debug(f'Unwatching {path}')
                 assert path in self.paths
-                f, decorator = self.paths.pop(path)
+                f, decorator, buffer = self.paths.pop(path)
                 self.loop.remove_reader(f)
-                self._do_read(f, decorator)
+                self._do_read(f, decorator, buffer, last=True)
+                f.close()
+                assert buffer == ['']
 
             def shutdown(self):
                 logger.debug('Shutting down')

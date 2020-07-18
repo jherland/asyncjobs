@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 
 from asyncjobs.logmux import LogMux
@@ -75,6 +76,17 @@ async def test_one_charwise_stream_decorated(verify_output):
     assert verify_output([['<foo>', '<bar>', '<baz>']])
 
 
+async def test_one_charwise_interrupted_stream_decorated(verify_output):
+    s = 'foo\nbar\nbaz'
+    async with LogMux() as logmux:
+        async with logmux.new_stream(lambda s: f'<{s.rstrip()}>\n') as f:
+            for c in s:
+                f.write(c)
+                f.flush()
+                await asyncio.sleep(0.001)
+    assert verify_output([['<foo>', '<bar>', '<baz>']])
+
+
 async def test_two_charwise_streams_decorated(verify_output):
     s = 'foo\nbar\nbaz'
     t = '123\n456\n789'
@@ -84,6 +96,23 @@ async def test_two_charwise_streams_decorated(verify_output):
                 for c, d in zip(s, t):
                     f.write(c)
                     g.write(d)
+    assert verify_output(
+        [['<foo>', '<bar>', '<baz>'], ['[123]', '[456]', '[789]']]
+    )
+
+
+async def test_two_charwise_interrupted_streams_decorated(verify_output):
+    s = 'foo\nbar\nbaz'
+    t = '123\n456\n789'
+    async with LogMux() as logmux:
+        async with logmux.new_stream(lambda s: f'<{s.rstrip()}>\n') as f:
+            async with logmux.new_stream(lambda s: f'[{s.rstrip()}]\n') as g:
+                for c, d in zip(s, t):
+                    f.write(c)
+                    g.write(d)
+                    f.flush()
+                    g.flush()
+                    await asyncio.sleep(0.001)
     assert verify_output(
         [['<foo>', '<bar>', '<baz>'], ['[123]', '[456]', '[789]']]
     )
