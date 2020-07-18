@@ -172,9 +172,9 @@ async def test_abort_many_jobs_in_threads_cannot_return_soon(num_jobs, run):
 
 async def test_abort_many_jobs_in_subprocs_returns_immediately(num_jobs, run):
     todo = [
-        TJob(f'foo #{i}', argv=mock_argv('sleep:5')) for i in range(num_jobs)
+        TJob(f'foo #{i}', argv=mock_argv('sleep:10')) for i in range(num_jobs)
     ]
-    with assert_elapsed_time(lambda t: t < 2.0):
+    with assert_elapsed_time(lambda t: t < 5.0):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(
         done, {f'foo #{i}': Cancelled for i in range(num_jobs)}
