@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 class LogMux:
     """Async task to multiplex many write streams into a single stream."""
 
+    @staticmethod
+    def default_decorator(s):
+        return s
+
     def __init__(self, out=None, tmp_base=None):
         self.out = sys.stdout if out is None else out
         self._q = None
@@ -31,6 +35,10 @@ class LogMux:
         Lines read from 'path' will be passed through 'decorator' before being
         written to this logmux's shared output.
         """
+        if decorator is None:  # => identity decorator
+            decorator = self.default_decorator
+        else:
+            assert callable(decorator)
         await self.q.put(('watch', path, decorator))
         await self.q.join()
 
@@ -97,14 +105,8 @@ class LogMux:
                     except Exception as e:
                         logger.error(f'Ignored exception: {e!r}')
 
-            def watch(self, path, decorator=None):
+            def watch(self, path, decorator):
                 logger.debug(f'Watching {path}')
-                if decorator is None:
-
-                    def identity(s):
-                        return s
-
-                    decorator = identity
                 assert path not in self.paths
                 f = open(
                     os.open(str(path), os.O_RDONLY | os.O_NONBLOCK),
