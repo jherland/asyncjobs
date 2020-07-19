@@ -227,7 +227,7 @@ def run(Scheduler):
         with cm:
             for job in todo:
                 scheduler.add_job(job.name, job, getattr(job, 'deps', None))
-            with abort_in(abort_after):
+            async with abort_in(abort_after):
                 return await scheduler.run()
 
     return _run

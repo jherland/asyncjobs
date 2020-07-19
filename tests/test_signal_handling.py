@@ -33,7 +33,7 @@ def run(Scheduler):
         with verified_events(scheduler, todo):
             for job in todo:
                 scheduler.add_job(job.name, job, getattr(job, 'deps', None))
-            with abort_in(abort_after):
+            async with abort_in(abort_after):
                 return await scheduler.run()
 
     return _run
@@ -89,7 +89,7 @@ async def test_abort_one_non_terminating_job_teminates_then_kills(run):
             ) as proc:
                 assert b'FOO\n' == await proc.stdout.readline()
                 # Subprocess will now ignore SIGTERM when we are cancelled
-                with abort_in(0.1):
+                async with abort_in(0.1):
                     await proc.wait()
 
     todo = [TJob('foo', coro=coro)]
@@ -139,7 +139,7 @@ async def test_abort_job_with_two_non_terminating_kills_both(run, num_workers):
                         assert b'BAR\n' == await proc2.stdout.readline()
                         # Both subprocesses will now ignore SIGTERM and we can
                         # proceed with cancelling.
-                        with abort_in(0.1):
+                        async with abort_in(0.1):
                             await proc2.wait()
                 await proc1.wait()
 
