@@ -6,6 +6,7 @@ from conftest import (
     Cancelled,
     TBasicJob,
     verified_events,
+    verify_number_of_tasks,
     verify_tasks,
 )
 
@@ -26,7 +27,10 @@ def run(Scheduler):
         with verified_events(scheduler, todo):
             for job in todo:
                 scheduler.add_job(job.name, job, getattr(job, 'deps', None))
-            return await scheduler.run(**run_args)
+            try:
+                return await scheduler.run(**run_args)
+            finally:
+                verify_number_of_tasks(1)  # no other tasks than test itself
 
     return _run
 

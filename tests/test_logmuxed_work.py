@@ -17,6 +17,7 @@ from conftest import (
     mock_argv,
     TExternalWorkJob,
     verified_events,
+    verify_number_of_tasks,
     verify_tasks,
 )
 
@@ -227,8 +228,11 @@ def run(Scheduler):
         with cm:
             for job in todo:
                 scheduler.add_job(job.name, job, getattr(job, 'deps', None))
-            async with abort_in(abort_after):
-                return await scheduler.run()
+            try:
+                async with abort_in(abort_after):
+                    return await scheduler.run()
+            finally:
+                verify_number_of_tasks(1)  # no other tasks than test itself
 
     return _run
 

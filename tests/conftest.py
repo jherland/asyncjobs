@@ -294,6 +294,16 @@ def num_jobs(num_workers):
     return min(100, num_workers * 10)
 
 
+def verify_number_of_tasks(n):
+    all_tasks = asyncio.all_tasks()
+    if len(asyncio.all_tasks()) != n:
+        message = f'There are {len(all_tasks)} != {n} running!'
+        logger.error(message)
+        for task in all_tasks:
+            logger.error(f'  - {task}')
+        raise RuntimeError(message)
+
+
 @pytest.fixture
 def scheduler_with_workers(num_workers):
     def make_scheduler_class(*bases):

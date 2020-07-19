@@ -58,6 +58,17 @@ if not hasattr(asyncio, 'current_task'):
     setattr(asyncio, 'current_task', current_task)
 
 
+# asyncio.all_tasks() added in Python v3.7
+if not hasattr(asyncio, 'all_tasks'):
+
+    def all_tasks(loop=None):
+        if loop is None:
+            loop = asyncio.get_running_loop()
+        return {t for t in asyncio.Task.all_tasks(loop) if not t.done()}
+
+    setattr(asyncio, 'all_tasks', all_tasks)
+
+
 # asyncio.run() added in Python v3.7
 if not hasattr(asyncio, 'run'):
     # The following was pilfered from Python v3.8's asyncio.runners:
