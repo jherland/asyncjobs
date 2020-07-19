@@ -1,6 +1,6 @@
 # Python
 /.nox/
-/.venv/
+/.venv*/
 __pycache__/
 
 # Python distribution/packaging
