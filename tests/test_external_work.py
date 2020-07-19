@@ -14,7 +14,6 @@ from conftest import (
     TExternalWorkJob,
     verified_events,
     verify_tasks,
-    Whatever,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -318,22 +317,25 @@ async def test_two_threads_concurrently(run, num_workers):
         return ret
 
     async def coro(ctx):
-        return await asyncio.gather(
+        results = await asyncio.gather(
             ctx.call_in_thread(thread_func, 'FOO'),
             ctx.call_in_thread(thread_func, 'BAR'),
+            return_exceptions=True,
         )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        return results
 
     job = TJob('foo', coro=coro)
     if num_workers < 2:  # Cannot allocate second worker
-        job.xevents.add('await worker slot')
-        job.xevents.add('awaited worker slot')
-        job.xevents.add('start work in thread', func=Whatever)
-        expect_result = RuntimeError(
-            f'Cannot allocate >={num_workers} worker(s) from job foo!'
-        )
+        with job.thread_xevents():  # Only one thread started
+            expect_result = RuntimeError(
+                f'Cannot allocate >={num_workers} worker(s) from job foo!'
+            )
     else:
         with job.thread_xevents():
-            with job.thread_xevents():
+            with job.thread_xevents():  # Both threads started
                 expect_result = ['FOO', 'BAR']
     done = await run([job])
     assert verify_tasks(done, {'foo': expect_result})
@@ -343,13 +345,19 @@ async def test_two_subprocesses_concurrently(run, num_workers):
     argv = mock_argv()
 
     async def coro(ctx):
-        return await asyncio.gather(
-            ctx.run_in_subprocess(argv), ctx.run_in_subprocess(argv),
+        results = await asyncio.gather(
+            ctx.run_in_subprocess(argv),
+            ctx.run_in_subprocess(argv),
+            return_exceptions=True,
         )
+        for result in results:
+            if isinstance(result, Exception):
+                raise result
+        return results
 
     job = TJob('foo', coro=coro)
     if num_workers < 2:  # Cannot allocate second worker
-        with job.subprocess_xevents(argv, result='abort'):
+        with job.subprocess_xevents(argv, result=0):  # Only one subprocess
             expect_result = RuntimeError(
                 f'Cannot allocate >={num_workers} worker(s) from job foo!'
             )

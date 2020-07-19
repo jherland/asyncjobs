@@ -257,7 +257,7 @@ class TExternalWorkJob(TBasicJob):
                     result = -9
                 else:
                     result = -15
-            if result is not None and result != 'abort':
+            if result is not None:
                 self.xevents.add(
                     'finish work in subprocess',
                     returncode=result,
