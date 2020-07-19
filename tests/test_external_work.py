@@ -291,6 +291,24 @@ async def test_non_terminating_subprocess_is_killed(run):
     assert verify_tasks(done, {'foo': b'FOO\n'})
 
 
+async def test_killing_subprocess_w_check_raises_CalledProcessError(run):
+    argv = mock_argv('ignore:SIGTERM', 'FOO', 'sleep:5')
+
+    async def coro(ctx):
+        with ctx.tjob.subprocess_xevents(argv, result='kill'):
+            async with ctx.subprocess(
+                argv, stdout=PIPE, check=True, kill_delay=0.1
+            ) as proc:
+                output = await proc.stdout.readline()
+                # MISSING await proc.wait() here to trigger termination
+        return output
+
+    todo = [TJob('foo', coro=coro)]
+    with assert_elapsed_time(lambda t: t < 0.5):
+        done = await run(todo)
+    assert verify_tasks(done, {'foo': CalledProcessError(-9, argv)})
+
+
 # multiple threads/subprocesses from a single job
 
 

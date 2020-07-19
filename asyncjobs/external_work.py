@@ -82,10 +82,8 @@ class Context(basic.Context):
         try:
             await asyncio.wait_for(proc.wait(), delay)
             logger.debug(f'{proc} {verb} done.')
-        except asyncio.TimeoutError as e:
-            # Reinstate the previous exception/return that caused this
-            if e.__context__ is not None:
-                raise e.__context__
+        except asyncio.TimeoutError:
+            logger.warning(f'Timed out {delay}s during {verb} {proc}')
         finally:
             if proc.returncode is None:  # still running
                 await self.terminate_subprocess(proc, argv, delay, kill=True)
