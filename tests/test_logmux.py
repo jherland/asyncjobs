@@ -142,3 +142,22 @@ async def test_one_bytewise_stream_with_garbage(capfdbinary):
     actual = capfdbinary.readouterr()
     assert actual.out == expect_bytestring
     assert actual.err == b''
+
+
+async def test_one_bytewise_stream_in_binary_mode_with_garbage(capfdbinary):
+    lines = [
+        b'first line...',
+        b'latin-1: \xc6\xd8\xc5...',
+        b'utf-8:   \xe2\x9c\x94\xe2\x88\x80\xe2\x9c\x98...',
+        b'f8 - ff: \xf8\xf9\xfa\xfb\xfc\xfd\xfe\xff...',
+        b'last line without newline',
+    ]
+    bytestring = b'\n'.join(lines)
+    prefix = b'>>> '
+    expect_bytestring = b''.join(prefix + line + b'\n' for line in lines)
+    async with LogMux() as logmux:
+        async with logmux.new_stream(prefix, mode='wb') as f:
+            f.write(bytestring)
+    actual = capfdbinary.readouterr()
+    assert actual.out == expect_bytestring
+    assert actual.err == b''

@@ -92,11 +92,11 @@ class LogMux:
         await self.q.join()
 
     @contextlib.asynccontextmanager
-    async def new_stream(self, decorator=None):
+    async def new_stream(self, decorator=None, *, mode='w'):
         """Context manager wrapping .watched_fifo() and .unwatch()."""
         path = await self.watched_fifo(decorator)
         try:
-            with open(path, 'w') as f:
+            with open(path, mode) as f:
                 yield f
         finally:
             await self.unwatch(path)
