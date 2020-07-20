@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import io
 import logging
 import os
 from pathlib import Path
@@ -13,8 +14,16 @@ def default_decorator(line):
     return line
 
 
-def simple_decorator(prefix='', suffix=''):
-    return lambda line: prefix + line.rstrip() + suffix.rstrip() + '\n'
+def simple_decorator(prefix=b'', suffix=b''):
+    # For convenience, convert string args to bytes automatically
+    if isinstance(prefix, str):
+        prefix = prefix.encode('utf-8', errors='surrogateescape')
+    assert isinstance(prefix, (bytes, bytearray))
+    if isinstance(suffix, str):
+        suffix = suffix.encode('utf-8', errors='surrogateescape')
+    assert isinstance(suffix, (bytes, bytearray))
+
+    return lambda line: prefix + line.rstrip() + suffix.rstrip() + b'\n'
 
 
 class LogMux:
@@ -25,7 +34,15 @@ class LogMux:
     simple_decorator = staticmethod(simple_decorator)
 
     def __init__(self, out=None, tmp_base=None):
-        self.out = sys.stdout if out is None else out
+        if out is None:
+            self.out = sys.stdout.buffer
+        elif not isinstance(out, (io.RawIOBase, io.BufferedIOBase)):
+            try:
+                self.out = out.buffer
+            except AttributeError:
+                raise ValueError(f'Cannot find binary stream in {out}')
+        else:
+            self.out = out
         self._q = None
         self.tempdir = TemporaryDirectory(dir=tmp_base, prefix='LogMux_')
         self.fifonum = 0
@@ -45,7 +62,7 @@ class LogMux:
         """
         if decorator is None:  # => identity decorator
             decorator = self.default_decorator
-        elif isinstance(decorator, str):  # => prefix
+        elif isinstance(decorator, (bytes, str)):  # => prefix
             decorator = self.simple_decorator(decorator)
         else:
             assert callable(decorator)
@@ -106,25 +123,25 @@ class LogMux:
                 self.loop = asyncio.get_running_loop()
 
             def _do_read(self, f, decorator, buffer, *, last=False):
-                *lines, buffer[0] = (buffer[0] + f.read()).split('\n')
-                if last and buffer[0]:  # no newline at end of file
-                    lines.append(buffer[0])
-                    buffer[0] = ''
+                buffer.extend(f.read())
+                lines = buffer.splitlines(keepends=True)
+                if lines and not lines[-1].endswith(b'\n') and not last:
+                    # keep partial line in buffer
+                    del buffer[: -len(lines[-1])]
+                    lines.pop()
+                else:
+                    buffer.clear()
                 for line in lines:
                     try:
-                        self.out.write(decorator(line + '\n'))
+                        self.out.write(decorator(line))
                     except Exception as e:
                         logger.error(f'Ignored exception: {e!r}')
 
             def watch(self, path, decorator):
                 logger.debug(f'Watching {path}')
                 assert path not in self.paths
-                f = open(
-                    os.open(str(path), os.O_RDONLY | os.O_NONBLOCK),
-                    mode='r',
-                    errors='surrogateescape',
-                )
-                buffer = ['']  # _do_read() needs buffer to be mutable
+                f = open(os.open(path, os.O_RDONLY | os.O_NONBLOCK), mode='rb')
+                buffer = bytearray()
                 self.paths[path] = f, decorator, buffer
                 self.loop.add_reader(f, self._do_read, f, decorator, buffer)
 
@@ -135,7 +152,7 @@ class LogMux:
                 self.loop.remove_reader(f)
                 self._do_read(f, decorator, buffer, last=True)
                 f.close()
-                assert buffer == ['']
+                assert not buffer
 
             def shutdown(self):
                 logger.debug('Shutting down')

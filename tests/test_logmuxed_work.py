@@ -145,23 +145,35 @@ class TJob(TExternalWorkJob):
 
     def xout(self):
         """Return expected stdout data from this job."""
-        dec = decorators(self.name)[0] if self.decorate else lambda s: s
-        if isinstance(self.out, list):
-            return [dec(line + '\n').rstrip() for line in self.out]
+        if self.decorate:
+            decorator = decorators(self.name)[0]
         else:
-            return [dec(self.out).rstrip()]
+            decorator = logmux.default_decorator
+        if isinstance(self.out, list):
+            lines = self.out
+        else:
+            lines = [self.out]
+        return [
+            decorator(line.encode('utf-8')).decode('utf-8').rstrip()
+            for line in lines
+        ]
 
     def xerr(self):
         """Return expected stderr data from this job."""
-        dec = decorators(self.name)[1] if self.decorate else lambda s: s
-        if self.log and self.logs_to_stderr:
-            logs = [dec(self.log).rstrip()]
+        if self.decorate:
+            decorator = decorators(self.name)[1]
         else:
-            logs = []
+            decorator = logmux.default_decorator
         if isinstance(self.err, list):
-            return [dec(line + '\n').rstrip() for line in self.err] + logs
+            lines = self.err
         else:
-            return [dec(self.err).rstrip()] + logs
+            lines = [self.err]
+        if self.log and self.logs_to_stderr:
+            lines += [self.log]
+        return [
+            decorator(line.encode('utf-8')).decode('utf-8').rstrip()
+            for line in lines
+        ]
 
     def shuffled_out_err(self, out_f, err_f):
         if isinstance(self.out, list):  # lines from list of strings

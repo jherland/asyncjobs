@@ -125,12 +125,7 @@ async def test_two_charwise_interrupted_streams_decorated(verify_output):
     )
 
 
-async def test_one_bytewise_stream_with_garbage(tmp_path):
-    # LogMux is text/line-based, but uses surrogateescape to preserve
-    # undecodable bytes from input to output. We'd like to use capfdbinary
-    # here, but _pytest.capture.EncodedFile does not support surrogateescape
-    # handling on output. Use a temp file instead.
-    output = tmp_path / 'output'
+async def test_one_bytewise_stream_with_garbage(capfdbinary):
     lines = [
         b'first line...',
         b'latin-1: \xc6\xd8\xc5...',
@@ -139,17 +134,11 @@ async def test_one_bytewise_stream_with_garbage(tmp_path):
         b'last line without newline',
     ]
     bytestring = b'\n'.join(lines)
-    with output.open('w', encoding='utf-8', errors='surrogateescape') as out:
-        async with LogMux(out) as logmux:
-            decorator = logmux.simple_decorator('❰', '❱')
-            async with logmux.new_stream(decorator) as f:
-                f.buffer.write(bytestring)
-    actual = output.read_text(encoding='utf-8', errors='surrogateescape')
-    expect_lines = [
-        '❰first line...❱',
-        '❰latin-1: \udcc6\udcd8\udcc5...❱',
-        '❰utf-8:   ✔∀✘...❱',
-        '❰f8 - ff: \udcf8\udcf9\udcfa\udcfb\udcfc\udcfd\udcfe\udcff...❱',
-        '❰last line without newline❱',
-    ]
-    assert actual == ''.join(line + '\n' for line in expect_lines)
+    prefix, suffix = '❰'.encode('utf-8'), '❱\n'.encode('utf-8')
+    expect_bytestring = b''.join(prefix + line + suffix for line in lines)
+    async with LogMux() as logmux:
+        async with logmux.new_stream(logmux.simple_decorator('❰', '❱')) as f:
+            f.buffer.write(bytestring)
+    actual = capfdbinary.readouterr()
+    assert actual.out == expect_bytestring
+    assert actual.err == b''
