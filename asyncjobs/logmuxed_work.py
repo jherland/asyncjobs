@@ -25,7 +25,7 @@ def redirected_job(decorate_out=None, decorate_err=None, log_handler=True):
             await asyncio.sleep(1)
             logger.info(world')
 
-        @redirected_job(decorate_out=lambda s: f'DECORATED: {s}')
+        @redirected_job(decorate_out='DECORATED: ')
         async def my_other_job(ctx):
             print('hello', file=ctx.stdout)
             await asyncio.sleep(1)

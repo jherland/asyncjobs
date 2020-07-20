@@ -73,8 +73,8 @@ def shuffled_prints(out_f, err_f, out_strings, err_strings):
 def decorators(job_name):
     """Return pair of out/err decorators that prefix job_name onto lines."""
     return (
-        lambda line: f'{job_name}/out: {line}',
-        lambda line: f'{job_name}/ERR: {line}',
+        logmux.simple_decorator(f'{job_name}/out: '),
+        logmux.simple_decorator(f'{job_name}/ERR: '),
     )
 
 
@@ -154,7 +154,10 @@ class TJob(TExternalWorkJob):
     def xerr(self):
         """Return expected stderr data from this job."""
         dec = decorators(self.name)[1] if self.decorate else lambda s: s
-        logs = [dec(self.log)] if self.log and self.logs_to_stderr else []
+        if self.log and self.logs_to_stderr:
+            logs = [dec(self.log).rstrip()]
+        else:
+            logs = []
         if isinstance(self.err, list):
             return [dec(line + '\n').rstrip() for line in self.err] + logs
         else:

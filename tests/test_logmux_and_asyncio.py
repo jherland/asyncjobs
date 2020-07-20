@@ -8,8 +8,7 @@ from conftest import verify_tasks
 
 async def job_coro(ctx):
     async with ctx.redirect(
-        decorate_out=lambda msg: f'{ctx.name}/out: {msg}',
-        decorate_err=lambda msg: f'{ctx.name}/ERR: {msg}',
+        decorate_out=f'{ctx.name}/out: ', decorate_err=f'{ctx.name}/ERR: ',
     ):
         print('FOO', file=ctx.stdout)
         print('BAR', file=ctx.stderr)

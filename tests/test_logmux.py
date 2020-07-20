@@ -38,7 +38,8 @@ async def test_two_streams_undecorated(verify_output):
 
 async def test_one_stream_decorated(verify_output):
     async with LogMux() as logmux:
-        async with logmux.new_stream(lambda s: f'[pre]{s[:-1]}[post]\n') as f:
+        decorator = LogMux.simple_decorator('[pre]', '[post]')
+        async with logmux.new_stream(decorator) as f:
             print('This is the first line', file=f)
             print('This is the second line', file=f)
     assert verify_output(
@@ -53,9 +54,11 @@ async def test_one_stream_decorated(verify_output):
 
 async def test_two_streams_decorated(verify_output):
     async with LogMux() as logmux:
-        async with logmux.new_stream(lambda s: f'1>>{s[:-1]}<<1\n') as f:
+        dec1 = LogMux.simple_decorator('1>>', '<<1')
+        async with logmux.new_stream(dec1) as f:
             print('This is stream 1 line 1', file=f)
-            async with logmux.new_stream(lambda s: f'2>>{s[:-1]}<<2\n') as g:
+            dec2 = LogMux.simple_decorator('2>>', '<<2')
+            async with logmux.new_stream(dec2) as g:
                 print('This is stream 2 line 1', file=g)
                 print('This is stream 2 line 2', file=g)
             print('This is stream 1 line 2', file=f)
@@ -70,7 +73,7 @@ async def test_two_streams_decorated(verify_output):
 async def test_one_charwise_stream_decorated(verify_output):
     s = 'foo\nbar\nbaz'
     async with LogMux() as logmux:
-        async with logmux.new_stream(lambda s: f'<{s.rstrip()}>\n') as f:
+        async with logmux.new_stream(logmux.simple_decorator('<', '>')) as f:
             for c in s:
                 f.write(c)
     assert verify_output([['<foo>', '<bar>', '<baz>']])
@@ -79,7 +82,7 @@ async def test_one_charwise_stream_decorated(verify_output):
 async def test_one_charwise_interrupted_stream_decorated(verify_output):
     s = 'foo\nbar\nbaz'
     async with LogMux() as logmux:
-        async with logmux.new_stream(lambda s: f'<{s.rstrip()}>\n') as f:
+        async with logmux.new_stream(logmux.simple_decorator('<', '>')) as f:
             for c in s:
                 f.write(c)
                 f.flush()
@@ -91,8 +94,10 @@ async def test_two_charwise_streams_decorated(verify_output):
     s = 'foo\nbar\nbaz'
     t = '123\n456\n789'
     async with LogMux() as logmux:
-        async with logmux.new_stream(lambda s: f'<{s.rstrip()}>\n') as f:
-            async with logmux.new_stream(lambda s: f'[{s.rstrip()}]\n') as g:
+        async with logmux.new_stream(logmux.simple_decorator('<', '>')) as f:
+            async with logmux.new_stream(
+                logmux.simple_decorator('[', ']')
+            ) as g:
                 for c, d in zip(s, t):
                     f.write(c)
                     g.write(d)
@@ -105,8 +110,10 @@ async def test_two_charwise_interrupted_streams_decorated(verify_output):
     s = 'foo\nbar\nbaz'
     t = '123\n456\n789'
     async with LogMux() as logmux:
-        async with logmux.new_stream(lambda s: f'<{s.rstrip()}>\n') as f:
-            async with logmux.new_stream(lambda s: f'[{s.rstrip()}]\n') as g:
+        async with logmux.new_stream(logmux.simple_decorator('<', '>')) as f:
+            async with logmux.new_stream(
+                logmux.simple_decorator('[', ']')
+            ) as g:
                 for c, d in zip(s, t):
                     f.write(c)
                     g.write(d)
@@ -134,7 +141,8 @@ async def test_one_bytewise_stream_with_garbage(tmp_path):
     bytestring = b'\n'.join(lines)
     with output.open('w', encoding='utf-8', errors='surrogateescape') as out:
         async with LogMux(out) as logmux:
-            async with logmux.new_stream(lambda s: f'❰{s.rstrip()}❱\n') as f:
+            decorator = logmux.simple_decorator('❰', '❱')
+            async with logmux.new_stream(decorator) as f:
                 f.buffer.write(bytestring)
     actual = output.read_text(encoding='utf-8', errors='surrogateescape')
     expect_lines = [

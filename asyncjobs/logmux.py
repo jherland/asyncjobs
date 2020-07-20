@@ -9,12 +9,20 @@ from tempfile import TemporaryDirectory
 logger = logging.getLogger(__name__)
 
 
+def default_decorator(line):
+    return line
+
+
+def simple_decorator(prefix='', suffix=''):
+    return lambda line: prefix + line.rstrip() + suffix.rstrip() + '\n'
+
+
 class LogMux:
     """Async task to multiplex many write streams into a single stream."""
 
-    @staticmethod
-    def default_decorator(s):
-        return s
+    default_decorator = staticmethod(default_decorator)
+
+    simple_decorator = staticmethod(simple_decorator)
 
     def __init__(self, out=None, tmp_base=None):
         self.out = sys.stdout if out is None else out
@@ -37,6 +45,8 @@ class LogMux:
         """
         if decorator is None:  # => identity decorator
             decorator = self.default_decorator
+        elif isinstance(decorator, str):  # => prefix
+            decorator = self.simple_decorator(decorator)
         else:
             assert callable(decorator)
         await self.q.put(('watch', path, decorator))
