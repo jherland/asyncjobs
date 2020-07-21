@@ -384,12 +384,40 @@ async def test_decorated_output_with_custom_log_formatter(run, verify_output):
     )
 
 
+async def test_decorated_output_with_demux_formatter(run, verify_output):
+    test_handler = ListHandler(level=logging.ERROR)
+    todo = [TJob(name, log_handler=test_handler) for name in ['foo', 'bar']]
+    await run(todo, log_formatter=logging.Formatter('<%(message)s>'))
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+    assert sorted(test_handler.messages()) == sorted(
+        f'<{job.log}>' for job in todo
+    )
+
+
 async def test_decorated_output_with_inherited_log_format(run, verify_output):
     test_handler = ListHandler(level=logging.ERROR)
     todo = [TJob(name, log_handler=test_handler) for name in ['foo', 'bar']]
     demuxer = logcontext.LogContextDemuxer()
     demuxer.setFormatter(logging.Formatter('<%(message)s>'))
     await run(todo, log_demuxer=demuxer)
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+    assert sorted(test_handler.messages()) == sorted(
+        f'<{job.log}>' for job in todo
+    )
+
+
+async def test_decorated_output_w_inherited_root_formatter(run, verify_output):
+    test_handler = ListHandler(level=logging.ERROR)
+    todo = [TJob(name, log_handler=test_handler) for name in ['foo', 'bar']]
+    root_handler = ListHandler()
+    root_handler.setFormatter(logging.Formatter('<%(message)s>'))
+    # Need to insert this handler _before_ any other root handler
+    logging.getLogger().handlers.insert(0, root_handler)
+    await run(todo, log_formatter=True)
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )

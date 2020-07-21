@@ -132,12 +132,14 @@ class Scheduler(external_work.Scheduler):
         outmux=None,
         errmux=None,
         log_demuxer=None,
+        log_formatter=None,
         context_class=Context,
         **kwargs,
     ):
         self.outmux = outmux
         self.errmux = errmux
         self.log_demuxer = log_demuxer
+        self.log_formatter = log_formatter
 
         assert issubclass(context_class, Context)
         super().__init__(context_class=context_class, **kwargs)
@@ -152,8 +154,11 @@ class Scheduler(external_work.Scheduler):
         if self.log_demuxer is None:
             self.log_demuxer = logcontext.LogContextDemuxer()
         assert isinstance(self.log_demuxer, logcontext.LogContextDemuxer)
+        copy_formatter = self.log_formatter is True
+        if isinstance(self.log_formatter, logging.Formatter):
+            self.log_demuxer.setFormatter(self.log_formatter)
 
         logger.debug('Starting LogMux instances…')
         async with self.outmux, self.errmux:
-            with self.log_demuxer.installed():
+            with self.log_demuxer.installed(copy_formatter=copy_formatter):
                 await super()._run_tasks(*args, **kwargs)
