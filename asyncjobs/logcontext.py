@@ -100,6 +100,8 @@ class LogContextDemuxer(logging.Handler):
             self.context_handlers.pop(context, None)
         else:
             self.context_handlers[context] = handler
+            if handler.formatter is None and self.formatter is not None:
+                handler.setFormatter(self.formatter)
 
     @contextlib.contextmanager
     def context_handler(self, handler):

@@ -280,7 +280,7 @@ class ListHandler(logging.Handler):
 
     def messages(self):
         for record in self.records:
-            yield record.msg
+            yield self.format(record)
 
 
 @pytest.fixture(params=[1, 2, 4, 100])

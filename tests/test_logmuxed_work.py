@@ -8,7 +8,7 @@ from subprocess import PIPE
 import sys
 import time
 
-from asyncjobs import logmux, logmuxed_work, signal_handling
+from asyncjobs import logcontext, logmux, logmuxed_work, signal_handling
 
 from conftest import (
     abort_in,
@@ -369,6 +369,33 @@ async def test_decorated_output_with_custom_log_handler(run, verify_output):
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
     assert sorted(test_handler.messages()) == sorted(job.log for job in todo)
+
+
+async def test_decorated_output_with_custom_log_formatter(run, verify_output):
+    test_handler = ListHandler(level=logging.ERROR)
+    test_handler.setFormatter(logging.Formatter('<%(message)s>'))
+    todo = [TJob(name, log_handler=test_handler) for name in ['foo', 'bar']]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+    assert sorted(test_handler.messages()) == sorted(
+        f'<{job.log}>' for job in todo
+    )
+
+
+async def test_decorated_output_with_inherited_log_format(run, verify_output):
+    test_handler = ListHandler(level=logging.ERROR)
+    todo = [TJob(name, log_handler=test_handler) for name in ['foo', 'bar']]
+    demuxer = logcontext.LogContextDemuxer()
+    demuxer.setFormatter(logging.Formatter('<%(message)s>'))
+    await run(todo, log_demuxer=demuxer)
+    assert verify_output(
+        [job.xout() for job in todo], [job.xerr() for job in todo],
+    )
+    assert sorted(test_handler.messages()) == sorted(
+        f'<{job.log}>' for job in todo
+    )
 
 
 async def test_decorated_output_from_spawned_jobs(run, verify_output):
