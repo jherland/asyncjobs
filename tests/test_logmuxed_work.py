@@ -70,14 +70,6 @@ def shuffled_prints(out_f, err_f, out_strings, err_strings):
     yield from random_interleave(out_prints, err_prints)
 
 
-def decorators(job_name):
-    """Return pair of out/err decorators that prefix job_name onto lines."""
-    return (
-        logmux.simple_decorator(f'{job_name}/out: '),
-        logmux.simple_decorator(f'{job_name}/ERR: '),
-    )
-
-
 class TJob(TExternalWorkJob):
     def __init__(
         self,
@@ -131,49 +123,26 @@ class TJob(TExternalWorkJob):
             return handler
 
         ctx.log_handler_factory = only_errors
-
-        if self.decorate:
-            dec_out, dec_err = decorators(self.name)
-        else:
-            dec_out, dec_err = None, None
         async with ctx.redirect(
-            decorate_out=dec_out,
-            decorate_err=dec_err,
+            decorate_out=f'{self.name}/out: ' if self.decorate else None,
+            decorate_err=f'{self.name}/ERR: ' if self.decorate else None,
             log_handler=self.log_handler,
         ):
             return await super().__call__(ctx)
 
     def xout(self):
         """Return expected stdout data from this job."""
-        if self.decorate:
-            decorator = decorators(self.name)[0]
-        else:
-            decorator = logmux.default_decorator
-        if isinstance(self.out, list):
-            lines = self.out
-        else:
-            lines = [self.out]
-        return [
-            decorator(line.encode('utf-8')).decode('utf-8').rstrip()
-            for line in lines
-        ]
+        prefix = f'{self.name}/out: ' if self.decorate else ''
+        lines = self.out if isinstance(self.out, list) else [self.out]
+        return [prefix + line.rstrip() for line in lines]
 
     def xerr(self):
         """Return expected stderr data from this job."""
-        if self.decorate:
-            decorator = decorators(self.name)[1]
-        else:
-            decorator = logmux.default_decorator
-        if isinstance(self.err, list):
-            lines = self.err
-        else:
-            lines = [self.err]
+        prefix = f'{self.name}/ERR: ' if self.decorate else ''
+        lines = self.err if isinstance(self.err, list) else [self.err]
         if self.log and self.logs_to_stderr:
             lines += [self.log]
-        return [
-            decorator(line.encode('utf-8')).decode('utf-8').rstrip()
-            for line in lines
-        ]
+        return [prefix + line.rstrip() for line in lines]
 
     def shuffled_out_err(self, out_f, err_f):
         if isinstance(self.out, list):  # lines from list of strings
@@ -583,9 +552,7 @@ async def test_redirected_job_with_no_decoration(run, verify_output):
 
 
 async def test_redirected_and_decorated_job_except_logger(run, verify_output):
-    dec_out, dec_err = decorators('foo')
-
-    @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
+    @logmuxed_work.redirected_job('foo/out: ', 'foo/ERR: ', log_handler=False)
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
@@ -599,9 +566,7 @@ async def test_redirected_and_decorated_job_except_logger(run, verify_output):
 
 
 async def test_redirected_and_decorated_job_include_logger(run, verify_output):
-    _, dec_err = decorators('foo')
-
-    @logmuxed_work.redirected_job(decorate_err=dec_err)
+    @logmuxed_work.redirected_job(decorate_err='foo/ERR: ')
     async def job(ctx):
         print('Printing to stdout', file=ctx.stdout)
         print('Printing to stderr', file=ctx.stderr)
@@ -616,13 +581,11 @@ async def test_redirected_and_decorated_job_include_logger(run, verify_output):
 
 
 async def test_redirected_job_with_decorated_subproc(run, verify_output):
-    dec_out, dec_err = decorators('foo')
-    argv = mock_argv(
-        'Printing to stdout', 'err:', 'Printing to stderr', 'log:Logging!'
-    )
-
-    @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
+    @logmuxed_work.redirected_job('foo/out: ', 'foo/ERR: ', log_handler=False)
     async def job(ctx):
+        argv = mock_argv(
+            'Printing to stdout', 'err:', 'Printing to stderr', 'log:Logging!'
+        )
         async with ctx.subprocess(argv) as proc:
             await proc.wait()
 
@@ -635,13 +598,11 @@ async def test_redirected_job_with_decorated_subproc(run, verify_output):
 
 
 async def test_redirected_job_with_subproc_output_capture(run, verify_output):
-    dec_out, dec_err = decorators('foo')
-    argv = mock_argv(
-        'Printing to stdout', 'err:', 'Printing to stderr', 'log:Logging!'
-    )
-
-    @logmuxed_work.redirected_job(dec_out, dec_err, log_handler=False)
+    @logmuxed_work.redirected_job('foo/out: ', 'foo/ERR: ', log_handler=False)
     async def job(ctx):
+        argv = mock_argv(
+            'Printing to stdout', 'err:', 'Printing to stderr', 'log:Logging!'
+        )
         async with ctx.subprocess(argv, stdout=PIPE) as proc:
             output = await proc.stdout.read()
             await proc.wait()

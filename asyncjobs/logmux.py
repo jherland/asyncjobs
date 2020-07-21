@@ -14,15 +14,40 @@ def default_decorator(line):
     return line
 
 
-def simple_decorator(prefix=b'', suffix=b''):
-    # For convenience, convert string args to bytes automatically
-    if isinstance(prefix, str):
-        prefix = prefix.encode('utf-8', errors='surrogateescape')
-    assert isinstance(prefix, (bytes, bytearray))
-    if isinstance(suffix, str):
-        suffix = suffix.encode('utf-8', errors='surrogateescape')
-    assert isinstance(suffix, (bytes, bytearray))
+def simple_decorator(pattern=None):
+    """Build a simple decorator function from the given pattern.
 
+    The decorator will prefix each line with the given pattern. If the given
+    pattern contains a '{}' placeholder, it will be used as a separator
+    between the prefix and suffix. In other words, this:
+
+      simple_decorator('foo {} bar')
+
+    is equivalent to this
+
+      lambda bs: b'foo ' + bs + b' bar' + b'\n'
+
+    Since LogMux works on bytes only, the decorator function returned from
+    here will also work on bytes only. However, for your convenience (and as
+    shown above), any strings given to this factory will be automatically
+    converted to bytes using string.encode('utf-8', errors='surrogateescape').
+    """
+    # process pattern as string, so we can use .format() below
+    if isinstance(pattern, (bytes, bytearray)):
+        pattern = pattern.decode('utf-8', errors='surrogateescape')
+    elif pattern is None:
+        pattern = ''
+    assert isinstance(pattern, str)
+
+    try:
+        assert '\0' not in pattern
+        prefix, suffix = pattern.format('\0').split('\0')
+    except (AssertionError, ValueError, IndexError):
+        prefix, suffix = pattern, ''
+
+    # convert everything to bytes
+    prefix = prefix.encode('utf-8', errors='surrogateescape')
+    suffix = suffix.encode('utf-8', errors='surrogateescape')
     return lambda line: prefix + line.rstrip() + suffix.rstrip() + b'\n'
 
 
@@ -62,7 +87,7 @@ class LogMux:
         """
         if decorator is None:  # => identity decorator
             decorator = self.default_decorator
-        elif isinstance(decorator, (bytes, str)):  # => prefix
+        elif isinstance(decorator, (str, bytes, bytearray)):  # => pattern
             decorator = self.simple_decorator(decorator)
         else:
             assert callable(decorator)
