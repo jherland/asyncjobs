@@ -44,18 +44,26 @@ class LogContextDemuxer(logging.Handler):
         self._installed = False
         super().__init__(*args, **kwargs)
 
-    def install(self, logger=None):
+    def install(self, logger=None, *, copy_formatter=False):
         """Install this demuxer into the given logger.
 
         If no logger is given, use the root logger.
+
+        If copy_formatter is enabled, the first formatter encountered in the
+        given logger's existing handlers will be copied into this demuxer and
+        automatically propagated to all the context handlers.
         """
         assert not self._installed
         if logger is None:  # install into root logger
             logger = logging.getLogger()
+        if copy_formatter:
+            self.formatter = None  # prepare to adopt first formatter found
 
         for handler in list(logger.handlers):
             assert handler is not self
             self.fallback_handlers.append(handler)
+            if copy_formatter and self.formatter is None:
+                self.formatter = handler.formatter
             logger.removeHandler(handler)
         logger.addHandler(self)
         self._installed = True
@@ -77,13 +85,13 @@ class LogContextDemuxer(logging.Handler):
         self._installed = False
 
     @contextlib.contextmanager
-    def installed(self, logger=None):
+    def installed(self, logger=None, **kwargs):
         """Provide a context where this demuxer is installed into 'logger'.
 
         If no logger is given, use the root logger.
         """
         assert not self.context_handlers
-        self.install(logger)
+        self.install(logger, **kwargs)
         try:
             yield
         finally:

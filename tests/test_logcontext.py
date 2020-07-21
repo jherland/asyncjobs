@@ -366,3 +366,35 @@ def test_LogContextDemuxer_async_context_handlers_inherit_demux_formatter():
     assert list(root_handler.messages()) == ['root<START>', 'root<END>']
     assert list(test1_handler.messages()) == ['test1<BEFORE>', 'test1<AFTER>']
     assert list(test2_handler.messages()) == ['demux<DURING>']
+
+
+def test_LogContextDemuxer_can_copy_formatter_from_fallback_and_propagate():
+    demux = logcontext.LogContextDemuxer(level=logging.ERROR)
+    demux.setFormatter(logging.Formatter('demux<%(message)s>'))  # overwritten
+    root_handler = ListHandler()
+    root_handler.setFormatter(logging.Formatter('root<%(message)s>'))
+    logging.getLogger().addHandler(root_handler)
+
+    test1_handler = ListHandler()
+    test1_handler.setFormatter(logging.Formatter('test1<%(message)s>'))
+    test2_handler = ListHandler()  # inherits demux.formatter <- root formatter
+    test_logger = logging.getLogger('test')
+
+    async def coro1():
+        with demux.context_handler(test1_handler):
+            test_logger.error('BEFORE')
+            await asyncio.create_task(coro2())
+            test_logger.error('AFTER')
+
+    async def coro2():
+        with demux.context_handler(test2_handler):
+            test_logger.error('DURING')
+
+    with demux.installed(copy_formatter=True):  # overwrites demux.formatter
+        test_logger.error('START')
+        asyncio.run(coro1())
+        test_logger.error('END')
+
+    assert list(root_handler.messages()) == ['root<START>', 'root<END>']
+    assert list(test1_handler.messages()) == ['test1<BEFORE>', 'test1<AFTER>']
+    assert list(test2_handler.messages()) == ['root<DURING>']
