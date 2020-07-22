@@ -75,7 +75,7 @@ if not hasattr(asyncio, 'run'):
     # https://github.com/python/cpython/blob/3.8/Lib/asyncio/runners.py
 
     def _cancel_all_tasks(loop):
-        to_cancel = asyncio.Task.all_tasks(loop)
+        to_cancel = {t for t in asyncio.Task.all_tasks(loop) if not t.done()}
         if not to_cancel:
             return
 
