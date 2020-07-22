@@ -80,7 +80,11 @@ class Context(basic.Context):
             else:
                 proc.terminate()
         try:
-            await asyncio.wait_for(proc.wait(), delay)
+            out, err = await asyncio.wait_for(proc.communicate(), delay)
+            if out:
+                logger.warning(f'{self.name}: {proc} stdout discard: {out!r}')
+            if err:
+                logger.warning(f'{self.name}: {proc} stderr discard: {err!r}')
             logger.debug(f'{self.name}: {proc} {verb} done.')
         except asyncio.TimeoutError:
             logger.warning(f'{self.name}: {delay}s timeout on {verb} {proc}')
