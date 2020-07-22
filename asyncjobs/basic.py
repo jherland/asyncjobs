@@ -102,14 +102,14 @@ class Context:
         pending = [n for n, t in zip(job_names, tasks) if not t.done()]
         self.event('await results', jobs=list(job_names), pending=pending)
         if pending:
-            logger.debug(f'waiting for {", ".join(pending)}…')
+            logger.debug(f'{self.name} waiting for {", ".join(pending)}…')
         try:
             results = dict(zip(job_names, await asyncio.gather(*tasks)))
         except Exception:
-            logger.info('Cancelled due to failed dependency')
+            logger.info(f'{self.name} cancelled due to failed dependency')
             raise asyncio.CancelledError
         self.event('awaited results')
-        logger.debug(f'Returning {results} from .results()')
+        logger.debug(f'{self.name} returning {results} from .results()')
         return results
 
     def add_job(self, name, coro, deps=None):

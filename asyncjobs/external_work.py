@@ -35,22 +35,22 @@ class Context(basic.Context):
                 )
             )
         self._workers_in_use += 1
-        logger.debug('-> acquiring worker semaphore…')
+        logger.debug(f'{self.name} -> acquiring worker semaphore…')
         self.event('await worker slot')
         async with self._scheduler.worker_semaphore:
             self.event('awaited worker slot')
-            logger.debug('-- acquired worker semaphore')
+            logger.debug(f'{self.name} -- acquired worker semaphore')
             try:
                 yield
             finally:
-                logger.debug('<- releasing worker semaphore')
+                logger.debug(f'{self.name} <- releasing worker semaphore')
                 self._workers_in_use -= 1
 
     async def call_in_thread(self, func, *args):
         """Call func(*args) in a worker thread and await its result."""
         async with self.reserve_worker():
             try:
-                logger.debug(f'-> starting {func} in worker thread…')
+                logger.debug(f'{self.name} -> start {func} in worker thread…')
                 self.event('start work in thread', func=str(func))
                 future = self._scheduler._start_in_thread(func, *args)
                 future.add_done_callback(
@@ -59,12 +59,12 @@ class Context(basic.Context):
                         fate=self._scheduler._fate(fut),
                     )
                 )
-                logger.debug('-- awaiting worker thread…')
+                logger.debug(f'{self.name} -- awaiting worker thread…')
                 result = await future
-                logger.debug(f'<- {result!r} from worker')
+                logger.debug(f'{self.name} <- {result!r} from worker')
                 return result
             except Exception as e:
-                logger.warning(f'<- Exception {e!r} from worker!')
+                logger.warning(f'{self.name} <- Exception {e!r} from worker!')
                 raise
 
     async def terminate_subprocess(self, proc, argv, delay, *, kill=False):
@@ -72,7 +72,7 @@ class Context(basic.Context):
             return
 
         verb = 'kill' if kill else 'terminate'
-        logger.warning(f'{proc} is still alive, {verb}…')
+        logger.warning(f'{self.name}: {proc} is still alive, {verb}…')
         self.event(f'subprocess {verb}', argv=argv, pid=proc.pid)
         with contextlib.suppress(ProcessLookupError):
             if kill:
@@ -81,9 +81,9 @@ class Context(basic.Context):
                 proc.terminate()
         try:
             await asyncio.wait_for(proc.wait(), delay)
-            logger.debug(f'{proc} {verb} done.')
+            logger.debug(f'{self.name}: {proc} {verb} done.')
         except asyncio.TimeoutError:
-            logger.warning(f'Timed out {delay}s during {verb} {proc}')
+            logger.warning(f'{self.name}: {delay}s timeout on {verb} {proc}')
         finally:
             if proc.returncode is None:  # still running
                 await self.terminate_subprocess(proc, argv, delay, kill=True)
@@ -108,14 +108,14 @@ class Context(basic.Context):
         code is not considered exceptional.
         """
         async with self.reserve_worker():
-            logger.debug(f'-> start {argv} in subprocess…')
+            logger.debug(f'{self.name} -> start {argv} in subprocess…')
             self.event('start work in subprocess', argv=argv)
             proc = await asyncio.create_subprocess_exec(*argv, **kwargs)
             try:
-                logger.debug(f'-- enter subprocess context for {argv}…')
+                logger.debug(f'{self.name} -- enter subprocess context…')
                 yield proc
             finally:
-                logger.debug(f'-- exit subprocess context for {argv}…')
+                logger.debug(f'{self.name} -- exited subprocess context…')
                 try:
                     if proc.returncode is None:  # still running
                         await self.terminate_subprocess(proc, argv, kill_delay)
@@ -130,9 +130,9 @@ class Context(basic.Context):
     async def run_in_subprocess(self, argv, **kwargs):
         """Run a command line in a subprocess and await its exit code."""
         async with self.subprocess(argv, **kwargs) as proc:
-            logger.debug('-- awaiting subprocess…')
+            logger.debug(f'{self.name} -- awaiting subprocess…')
             await proc.wait()
-            logger.debug('-- awaited subprocess…')
+            logger.debug(f'{self.name} -- awaited subprocess')
             return proc.returncode
 
 
