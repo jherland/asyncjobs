@@ -12,6 +12,7 @@ from asyncjobs import logcontext, logmux, logmuxed_work, signal_handling
 
 from conftest import (
     abort_in,
+    adjusted_logger_level,
     assert_elapsed_time,
     ListHandler,
     mock_argv,
@@ -172,23 +173,27 @@ class TJob(TExternalWorkJob):
         return mock_argv(*args)
 
     async def do_async(self, ctx):
-        for print_one in self.shuffled_out_err(ctx.stdout, ctx.stderr):
-            print_one()
-            await asyncio.sleep(0)
-        if self.log:
-            logger.error(self.log)
+        with ctx.stdout as outf, ctx.stderr as errf:
+            for print_one in self.shuffled_out_err(outf, errf):
+                print_one()
+                await asyncio.sleep(0)
+            if self.log:
+                logger.error(self.log)
 
     async def do_thread(self, ctx):
-        def in_thread(ctx):
-            for print_one in self.shuffled_out_err(ctx.stdout, ctx.stderr):
+        def in_thread(outf, errf, *_):
+            for print_one in self.shuffled_out_err(outf, errf):
                 print_one()
                 time.sleep(0.001)
             if self.log:
                 logger.error(self.log)
 
-        return await self.run_thread(
-            in_thread, ctx, log_handler=self.log_handler
-        )
+        with ctx.stdout as outf, ctx.stderr as errf:
+            return await self.run_thread(
+                functools.partial(in_thread, outf, errf),
+                ctx,
+                log_handler=self.log_handler,
+            )
 
     async def do_mock_argv(self, ctx):
         return await self.run_subprocess(self.mock_argv(self.extras), ctx)
@@ -539,12 +544,15 @@ async def test_subproc_capture_stdout_from_terminated_proc(run, verify_output):
 async def test_redirected_job_with_no_decoration(run, verify_output):
     @logmuxed_work.redirected_job()
     async def job(ctx):
-        print('Printing to stdout', file=ctx.stdout)
-        print('Printing to stderr', file=ctx.stderr)
-        logger.error('Logging to stderr')
+        with ctx.stdout as outf, ctx.stderr as errf:
+            print('Printing to stdout', file=outf)
+            print('Printing to stderr', file=errf)
+            logger.error('Logging to stderr')
 
     job.name = 'foo'
-    await run([job], check_events=False)
+    # Prevent logmux DEBUG messages on stderr
+    with adjusted_logger_level(logmux.logger, logging.INFO):
+        await run([job], check_events=False)
     assert verify_output(
         [['Printing to stdout']],
         [['Printing to stderr', 'Logging to stderr']],
@@ -554,9 +562,10 @@ async def test_redirected_job_with_no_decoration(run, verify_output):
 async def test_redirected_and_decorated_job_except_logger(run, verify_output):
     @logmuxed_work.redirected_job('foo/out: ', 'foo/ERR: ', log_handler=False)
     async def job(ctx):
-        print('Printing to stdout', file=ctx.stdout)
-        print('Printing to stderr', file=ctx.stderr)
-        logger.error('Logging to stderr')
+        with ctx.stdout as outf, ctx.stderr as errf:
+            print('Printing to stdout', file=outf)
+            print('Printing to stderr', file=errf)
+            logger.error('Logging to stderr')
 
     job.name = 'foo'
     await run([job], check_events=False)
@@ -568,12 +577,15 @@ async def test_redirected_and_decorated_job_except_logger(run, verify_output):
 async def test_redirected_and_decorated_job_include_logger(run, verify_output):
     @logmuxed_work.redirected_job(decorate_err='foo/ERR: ')
     async def job(ctx):
-        print('Printing to stdout', file=ctx.stdout)
-        print('Printing to stderr', file=ctx.stderr)
-        logger.error('Logging to stderr')
+        with ctx.stdout as outf, ctx.stderr as errf:
+            print('Printing to stdout', file=outf)
+            print('Printing to stderr', file=errf)
+            logger.error('Logging to stderr')
 
     job.name = 'foo'
-    await run([job], check_events=False)
+    # Prevent logmux DEBUG messages on stderr
+    with adjusted_logger_level(logmux.logger, logging.INFO):
+        await run([job], check_events=False)
     assert verify_output(
         [['Printing to stdout']],
         [['foo/ERR: Printing to stderr', 'foo/ERR: Logging to stderr']],

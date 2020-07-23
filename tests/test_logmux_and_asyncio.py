@@ -1,18 +1,20 @@
 import asyncio
+import logging
 import sys
 
 from asyncjobs import logmux, logmuxed_work
 
-from conftest import verify_tasks
+from conftest import adjusted_logger_level, verify_tasks
 
 
 async def job_coro(ctx):
     async with ctx.redirect(
         decorate_out=f'{ctx.name}/out: ', decorate_err=f'{ctx.name}/ERR: ',
     ):
-        print('FOO', file=ctx.stdout)
-        print('BAR', file=ctx.stderr)
-        return 123
+        with ctx.stdout as outf, ctx.stderr as errf:
+            print('FOO', file=outf)
+            print('BAR', file=errf)
+            return 123
 
 
 async def noop():
@@ -38,7 +40,9 @@ def test_instantiating_logmux_after_asyncio_run_is_ok():
 def test_one_simple_job_through_default_muxes(verify_output, num_workers):
     scheduler = logmuxed_work.Scheduler(workers=num_workers)
     scheduler.add_job('foo', job_coro)
-    done = asyncio.run(scheduler.run())
+    # Prevent logmux DEBUG messages on stderr
+    with adjusted_logger_level(logmux.logger, logging.INFO):
+        done = asyncio.run(scheduler.run())
     assert verify_tasks(done, {'foo': 123})
     assert verify_output([['foo/out: FOO']], [['foo/ERR: BAR']])
 
@@ -50,6 +54,8 @@ def test_one_simple_job_through_custom_muxes(verify_output, num_workers):
         errmux=logmux.LogMux(sys.stdout),
     )
     scheduler.add_job('foo', job_coro)
-    done = asyncio.run(scheduler.run())
+    # Prevent logmux DEBUG messages on stderr
+    with adjusted_logger_level(logmux.logger, logging.INFO):
+        done = asyncio.run(scheduler.run())
     assert verify_tasks(done, {'foo': 123})
     assert verify_output([['foo/ERR: BAR']], [['foo/out: FOO']])

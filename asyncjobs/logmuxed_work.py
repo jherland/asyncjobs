@@ -26,9 +26,10 @@ def redirected_job(decorate_out=None, decorate_err=None, log_handler=True):
 
         @redirected_job(decorate_out='DECORATED: ')
         async def my_other_job(ctx):
-            print('hello', file=ctx.stdout)
-            await asyncio.sleep(1)
-            print(again', file=ctx.stdout)
+            with ctx.stdout as f:
+                print('hello', file=f)
+                await asyncio.sleep(1)
+                print(again', file=f)
     """
 
     def wrap(coro):
@@ -53,14 +54,17 @@ class Context(external_work.Context):
     output stream(s) controlled by the below Scheduler.
 
     Redirection of the actual stdout/stderr file descriptors is automatically
-    done for subprocesses, and for loggers (unless log_handler is False).
-    Other output (from thread workers or directly from .__call__() must be
-    redirected to self.stdout/self.stderr manually.)
+    done for subprocesses, and for loggers (unless a custom log_handler is
+    passed, or if log handling is disabled by log_handler=False).
+    Other output (from thread workers or directly from .__call__()) must be
+    redirected manually into the file descriptor retrieved from
+    self.stdout.open() or self.stderr.open() (or by using self.stdout or
+    self.stderr as context managers).
     """
 
     @staticmethod
     def default_log_handler_factory(ctx):
-        return logging.StreamHandler(ctx.stderr)
+        return logging.StreamHandler(ctx.stderr.open())
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -74,6 +78,7 @@ class Context(external_work.Context):
             handler = self.log_handler_factory(self)
         elif handler is False:
             handler = None
+
         assert handler is None or isinstance(handler, logging.Handler)
         with self._scheduler.log_demuxer.context_handler(handler):
             yield handler
@@ -82,26 +87,29 @@ class Context(external_work.Context):
     async def redirect(
         self, *, decorate_out=None, decorate_err=None, log_handler=True
     ):
-        with self._scheduler.outmux.new_stream(decorate_out) as outf:
-            with self._scheduler.errmux.new_stream(decorate_err) as errf:
-                self.stdout = outf
-                self.stderr = errf
-                try:
-                    with self._log_context(log_handler):
-                        yield
-                finally:
-                    self.stdout = None
-                    self.stderr = None
+        assert self.stdout is None and self.stderr is None
+        try:
+            self.stdout = self._scheduler.outmux.new_stream(decorate_out)
+            self.stderr = self._scheduler.errmux.new_stream(decorate_err)
+            with self._log_context(log_handler):
+                yield
+        finally:
+            if self.stdout is not None:
+                self.stdout.close()
+                self.stdout = None
+            if self.stderr is not None:
+                self.stderr.close()
+                self.stderr = None
 
     async def call_in_thread(self, func, *args, log_handler=True):
         """Call func(*args) in a worker thread and await its result."""
 
         @functools.wraps(func)
-        def func_wrapped_in_log_context(*args):
+        def call_func_in_log_context(*args):
             with self._log_context(log_handler):
                 return func(*args)
 
-        return await super().call_in_thread(func_wrapped_in_log_context, *args)
+        return await super().call_in_thread(call_func_in_log_context, *args)
 
     @contextlib.asynccontextmanager
     async def subprocess(self, argv, **kwargs):
@@ -109,12 +117,13 @@ class Context(external_work.Context):
 
         Only if stdout/stderr is not already customized by the caller.
         """
-        if kwargs.get('stdout') is None:
-            kwargs['stdout'] = self.stdout
-        if kwargs.get('stderr') is None:
-            kwargs['stderr'] = self.stderr
-        async with super().subprocess(argv, **kwargs) as proc:
-            yield proc
+        with contextlib.ExitStack() as stack:
+            if kwargs.get('stdout') is None:
+                kwargs['stdout'] = stack.enter_context(self.stdout)
+            if kwargs.get('stderr') is None:
+                kwargs['stderr'] = stack.enter_context(self.stderr)
+            async with super().subprocess(argv, **kwargs) as proc:
+                yield proc
 
 
 class Scheduler(external_work.Scheduler):
