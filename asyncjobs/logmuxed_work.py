@@ -1,4 +1,3 @@
-import asyncio
 import contextlib
 import functools
 import logging
@@ -83,8 +82,8 @@ class Context(external_work.Context):
     async def redirect(
         self, *, decorate_out=None, decorate_err=None, log_handler=True
     ):
-        async with self._scheduler.outmux.new_stream(decorate_out) as outf:
-            async with self._scheduler.errmux.new_stream(decorate_err) as errf:
+        with self._scheduler.outmux.new_stream(decorate_out) as outf:
+            with self._scheduler.errmux.new_stream(decorate_err) as errf:
                 self.stdout = outf
                 self.stderr = errf
                 try:
@@ -147,10 +146,8 @@ class Scheduler(external_work.Scheduler):
     async def _run_tasks(self, *args, **kwargs):
         if self.outmux is None:
             self.outmux = logmux.LogMux(sys.stdout)
-        assert asyncio.get_running_loop() is self.outmux.q._loop
         if self.errmux is None:
             self.errmux = logmux.LogMux(sys.stderr)
-        assert asyncio.get_running_loop() is self.errmux.q._loop
         if self.log_demuxer is None:
             self.log_demuxer = logcontext.LogContextDemuxer()
         assert isinstance(self.log_demuxer, logcontext.LogContextDemuxer)
@@ -159,6 +156,6 @@ class Scheduler(external_work.Scheduler):
             self.log_demuxer.setFormatter(self.log_formatter)
 
         logger.debug('Starting LogMux instances…')
-        async with self.outmux, self.errmux:
+        with self.outmux, self.errmux:
             with self.log_demuxer.installed(copy_formatter=copy_formatter):
                 await super()._run_tasks(*args, **kwargs)

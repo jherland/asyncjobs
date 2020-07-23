@@ -61,17 +61,15 @@ class DecoratedStream:
         self.fifo = None
         self.used_by = 0
 
-    async def open(self):
-        assert self.logmux._task is not None  # LogMux parent is active
+    def open(self):
         if self.path is None:  # FIFO not yet open
             assert self.fifo is None
-            self.path = await self.logmux.watched_fifo(self.decorator)
+            self.path = self.logmux.watched_fifo(self.decorator)
             self.fifo = self.path.open(self.mode)
         self.used_by += 1
         return self.fifo
 
-    async def close(self):
-        assert self.logmux._task is not None  # LogMux parent is active
+    def close(self):
         if self.path is None:  # already closed
             assert self.used_by == 0 and self.fifo is None
             return
@@ -81,14 +79,14 @@ class DecoratedStream:
             if self.fifo is not None:
                 self.fifo.close()
                 self.fifo = None
-            await self.logmux.unwatch(self.path)
+            self.logmux.unwatch(self.path)
             self.path = None
 
-    async def __aenter__(self):
-        return await self.open()
+    def __enter__(self):
+        return self.open()
 
-    async def __aexit__(self, *exc_details):
-        await self.close()
+    def __exit__(self, *_):
+        self.close()
 
 
 class LogMux:
@@ -108,18 +106,31 @@ class LogMux:
                 raise ValueError(f'Cannot find binary stream in {out}')
         else:
             self.out = out
-        self._q = None
         self.tempdir = TemporaryDirectory(dir=tmp_base, prefix='LogMux_')
         self.fifonum = 0
-        self._task = None
+        self.watches = {}  # map path -> (f, decorator, buffer)
 
-    @property
-    def q(self):
-        if self._q is None:
-            self._q = asyncio.Queue()
-        return self._q
+    def new_stream(self, decorator=None, mode='w'):
+        return DecoratedStream(self, decorator, mode)
 
-    async def _watch(self, path, decorator=None):
+    def watched_fifo(self, decorator=None):
+        """Create a FIFO (aka. named pipe) that is watched by LogMux.
+
+        Creates a FIFO in self.tempdir, and returns its path.
+        The FIFO is watched by this LogMux, so anything written into it will
+        appear on this LogMux's output (after passing through 'decorator').
+
+        The FIFO (and the rest of self.tempdir) will be automatically removed
+        on shutdown.
+        """
+        self.fifonum += 1
+        fifopath = Path(self.tempdir.name, f'fifo{self.fifonum}')
+        assert not fifopath.exists()
+        os.mkfifo(fifopath)
+        self._watch(fifopath, decorator)
+        return fifopath
+
+    def _watch(self, path, decorator=None):
         """Add the given 'path' to be watched by LogMux.
 
         Lines read from 'path' will be passed through 'decorator' before being
@@ -131,113 +142,50 @@ class LogMux:
             decorator = self.simple_decorator(decorator)
         else:
             assert callable(decorator)
-        await self.q.put(('watch', path, decorator))
-        await self.q.join()
 
-    async def watched_fifo(self, decorator=None):
-        """Create a FIFO (aka. named pipe) that is watched by LogMux.
+        logger.debug(f'Watching {path}')
+        assert path not in self.watches
+        f = open(os.open(path, os.O_RDONLY | os.O_NONBLOCK), mode='rb')
+        buffer = bytearray()
+        self.watches[path] = f, decorator, buffer
+        asyncio.get_running_loop().add_reader(
+            f, self._do_read, f, decorator, buffer
+        )
 
-        Creates a FIFO in self.tempdir, and returns its path.
-        The FIFO is watched by LogMux, so anything written into it will appear
-        on LogMux's output (after being passed through 'decorator').
+    def _do_read(self, f, decorator, buffer, *, last=False):
+        buffer.extend(f.read())
+        lines = buffer.splitlines(keepends=True)
+        if lines and not lines[-1].endswith(b'\n') and not last:
+            # keep partial line in buffer
+            del buffer[: -len(lines[-1])]
+            lines.pop()
+        else:
+            buffer.clear()
+        for line in lines:
+            self.out.write(decorator(line))
 
-        The FIFO (and the rest of self.tempdir) will be automatically removed
-        on shutdown.
-        """
-        self.fifonum += 1
-        fifopath = Path(self.tempdir.name, f'fifo{self.fifonum}')
-        assert not fifopath.exists()
-        os.mkfifo(fifopath)
-        await self._watch(fifopath, decorator)
-        return fifopath
-
-    async def unwatch(self, path):
+    def unwatch(self, path):
         """Stop watching the given 'path'."""
-        await self.q.put(('unwatch', path))
-        await self.q.join()
+        logger.debug(f'Unwatching {path}')
+        assert path in self.watches
+        f, decorator, buffer = self.watches.pop(path)
+        asyncio.get_running_loop().remove_reader(f)
+        self._do_read(f, decorator, buffer, last=True)
+        f.close()
+        assert not buffer
 
-    def new_stream(self, decorator=None, mode='w'):
-        return DecoratedStream(self, decorator, mode)
-
-    async def shutdown(self):
+    def shutdown(self):
         """Shutdown LogMux. Stop watching all files and cleanup temporaries."""
-        await self.q.put(('shutdown',))  # Signal shutdown
-        await self.q.join()
+        logger.debug('Shutting down')
+        for path in sorted(self.watches.keys()):
+            logger.warning(f'{path} was not unwatched!')
+            self.unwatch(path)
+        if not self.out.closed:
+            self.out.flush()
         self.tempdir.cleanup()
 
-    async def service(self):
-        """Coroutine reading from watched stream and writing to the shared out.
-
-        Communicates with the above methods via self.q. Runs until .shutdown()
-        is called.
-        """
-
-        class Muxer:
-            def __init__(self, q, out):
-                self.q = q
-                self.out = out
-                self.paths = {}  # map path -> (f, decorator, buffer)
-                self.running = False
-                self.loop = asyncio.get_running_loop()
-
-            def _do_read(self, f, decorator, buffer, *, last=False):
-                buffer.extend(f.read())
-                lines = buffer.splitlines(keepends=True)
-                if lines and not lines[-1].endswith(b'\n') and not last:
-                    # keep partial line in buffer
-                    del buffer[: -len(lines[-1])]
-                    lines.pop()
-                else:
-                    buffer.clear()
-                for line in lines:
-                    try:
-                        self.out.write(decorator(line))
-                    except Exception as e:
-                        logger.error(f'Ignored exception: {e!r}')
-
-            def watch(self, path, decorator):
-                logger.debug(f'Watching {path}')
-                assert path not in self.paths
-                f = open(os.open(path, os.O_RDONLY | os.O_NONBLOCK), mode='rb')
-                buffer = bytearray()
-                self.paths[path] = f, decorator, buffer
-                self.loop.add_reader(f, self._do_read, f, decorator, buffer)
-
-            def unwatch(self, path):
-                logger.debug(f'Unwatching {path}')
-                assert path in self.paths
-                f, decorator, buffer = self.paths.pop(path)
-                self.loop.remove_reader(f)
-                self._do_read(f, decorator, buffer, last=True)
-                f.close()
-                assert not buffer
-
-            def shutdown(self):
-                logger.debug('Shutting down')
-                for path in sorted(self.paths.keys()):
-                    logger.warning(f'{path} was not unwatched!')
-                    self.unwatch(path)
-                self.out.flush()
-                self.running = False
-
-            async def run(self):
-                self.running = True
-                while self.running:
-                    cmd, *args = await self.q.get()
-                    assert cmd in {'watch', 'unwatch', 'shutdown'}
-                    getattr(self, cmd)(*args)
-                    self.q.task_done()
-
-        await Muxer(self.q, self.out).run()
-
-    async def __aenter__(self):
-        assert self._task is None
-        self._task = asyncio.create_task(self.service())
+    def __enter__(self):
         return self
 
-    async def __aexit__(self, *_):
-        assert self._task is not None
-        assert not self._task.done()
-        await self.shutdown()
-        await self._task
-        self._task = None
+    def __exit__(self, *_):
+        self.shutdown()
