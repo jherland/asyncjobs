@@ -4,6 +4,7 @@ import functools
 import logging
 import pytest
 import random
+import resource
 from subprocess import PIPE
 import sys
 import time
@@ -672,3 +673,16 @@ async def test_decorated_output_from_many_subprocesses(
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
+
+
+async def test_try_to_provoke_too_many_open_files(run):
+    # Each job creates 2 logmuxes. Try to exhaust available file descriptors
+    num_jobs = resource.getrlimit(resource.RLIMIT_NOFILE)[0] // 2
+    todo = [TJob(f'job #{i}') for i in range(num_jobs)]
+    done = await run(todo)
+    for task in done.values():
+        assert task.done()
+        if not task.cancelled():
+            e = task.exception()
+            assert isinstance(e, OSError), repr(e)
+            assert e.args == (24, 'Too many open files'), repr(e)
