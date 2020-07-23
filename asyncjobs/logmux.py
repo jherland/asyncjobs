@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import io
 import logging
 import os
@@ -49,6 +48,47 @@ def simple_decorator(pattern=None):
     prefix = prefix.encode('utf-8', errors='surrogateescape')
     suffix = suffix.encode('utf-8', errors='surrogateescape')
     return lambda line: prefix + line.rstrip() + suffix.rstrip() + b'\n'
+
+
+class DecoratedStream:
+    """Manage the opening/closing of a LogMux FIFO."""
+
+    def __init__(self, logmux, decorator=None, mode='w'):
+        self.logmux = logmux
+        self.decorator = decorator
+        self.mode = mode
+        self.path = None
+        self.fifo = None
+        self.used_by = 0
+
+    async def open(self):
+        assert self.logmux._task is not None  # LogMux parent is active
+        if self.path is None:  # FIFO not yet open
+            assert self.fifo is None
+            self.path = await self.logmux.watched_fifo(self.decorator)
+            self.fifo = self.path.open(self.mode)
+        self.used_by += 1
+        return self.fifo
+
+    async def close(self):
+        assert self.logmux._task is not None  # LogMux parent is active
+        if self.path is None:  # already closed
+            assert self.used_by == 0 and self.fifo is None
+            return
+
+        self.used_by -= 1
+        if self.used_by <= 0:
+            if self.fifo is not None:
+                self.fifo.close()
+                self.fifo = None
+            await self.logmux.unwatch(self.path)
+            self.path = None
+
+    async def __aenter__(self):
+        return await self.open()
+
+    async def __aexit__(self, *exc_details):
+        await self.close()
 
 
 class LogMux:
@@ -116,15 +156,8 @@ class LogMux:
         await self.q.put(('unwatch', path))
         await self.q.join()
 
-    @contextlib.asynccontextmanager
-    async def new_stream(self, decorator=None, *, mode='w'):
-        """Context manager wrapping .watched_fifo() and .unwatch()."""
-        path = await self.watched_fifo(decorator)
-        try:
-            with open(path, mode) as f:
-                yield f
-        finally:
-            await self.unwatch(path)
+    def new_stream(self, decorator=None, mode='w'):
+        return DecoratedStream(self, decorator, mode)
 
     async def shutdown(self):
         """Shutdown LogMux. Stop watching all files and cleanup temporaries."""
