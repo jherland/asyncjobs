@@ -94,6 +94,30 @@ def test_formatter_with_context_decorator_decorates_in_context(any_context):
     any_context(in_context)
     assert handler.messages == ['>>>FOO<<<']
 
+    def test_use_None_as_context_decorator(self):
+        def in_context():
+            with logcontext.Decorator.use(None):
+                self.logger.error('FOO')
+
+        self.run_in_context(in_context)
+        assert self.handler.messages == ['[FOO]']
+
+    def test_use_string_as_context_decorator(self):
+        def in_context():
+            with logcontext.Decorator.use('❰❰❰{}❱❱❱'):
+                self.logger.error('FOO')
+
+        self.run_in_context(in_context)
+        assert self.handler.messages == ['❰❰❰[FOO]❱❱❱']
+
+    def test_use_bytes_as_context_decorator(self):
+        def in_context():
+            with logcontext.Decorator.use(b'>>>'):
+                self.logger.error('FOO')
+
+        self.run_in_context(in_context)
+        assert self.handler.messages == ['>>>[FOO]']
+
 
 # LogContextDemuxer forwards log records to appropriate handler
 

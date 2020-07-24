@@ -26,8 +26,32 @@ class Decorator:
     registry = {}  # context -> decorator function
 
     @classmethod
+    def from_string(cls, pattern):
+        try:
+            assert '\0' not in pattern
+            prefix, suffix = pattern.format('\0').split('\0')
+        except (AssertionError, ValueError, IndexError):
+            prefix, suffix = pattern, ''
+
+        return lambda line: prefix + line.rstrip() + suffix.rstrip()
+
+    @classmethod
+    def from_bytes(cls, pattern):
+        return cls.from_string(
+            pattern.decode('utf-8', errors='surrogateescape')
+        )
+
+    @classmethod
     def add(cls, decorator, context=NotSet):
         context = current_context() if context is NotSet else context
+        if decorator is None:  # no decoration
+            return cls.remove(context)
+        elif isinstance(decorator, str):  # 'prefix{}suffix'
+            decorator = cls.from_string(decorator)
+        elif isinstance(decorator, (bytes, bytearray)):  # b'prefix{}suffix'
+            decorator = cls.from_bytes(decorator)
+        else:
+            assert callable(decorator)
         cls.registry[context] = decorator
 
     @classmethod
@@ -44,10 +68,7 @@ class Decorator:
     @contextlib.contextmanager
     def use(cls, decorator, context=NotSet):
         context = current_context() if context is NotSet else context
-        if decorator is None:
-            cls.remove(context)
-        else:
-            cls.add(decorator, context)
+        cls.add(decorator, context)
         try:
             yield
         finally:
