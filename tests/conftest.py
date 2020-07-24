@@ -12,7 +12,7 @@ import sys
 import time
 import traceback
 
-import asyncjobs  # noqa: F401 (we need asynccontextmanager from polyfill)
+from asyncjobs import logcontext
 from verify_events import EventVerifier, ExpectedJobEvents, Whatever
 
 logger = logging.getLogger(__name__)
@@ -265,22 +265,6 @@ class TExternalWorkJob(TBasicJob):
                 )
 
 
-class ListHandler(logging.Handler):
-    """A log handler implementation that simply stores log records in a list.
-
-    Used to test that log records are dispatched correctly by the demuxer.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.records = []
-        self.messages = []
-
-    def emit(self, record):
-        self.records.append(record)
-        self.messages.append(self.format(record))
-
-
 @pytest.fixture(params=[1, 2, 4, 100])
 def num_workers(request):
     return request.param
@@ -387,6 +371,31 @@ def verify_tasks(tasks, expects):
             if task.result() != expect:
                 fail(name, expect, task.result())
     return errors == 0
+
+
+class ListHandler(logging.Handler):
+    """A log handler implementation that simply stores log records in a list.
+
+    Used to test that log records are handled/formatted correctly.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.records = []
+        self.messages = []
+
+    def emit(self, record):
+        self.records.append(record)
+        self.messages.append(self.format(record))
+
+
+@pytest.fixture
+def logger_with_listhandler():
+    logger = logging.getLogger('test')
+    handler = ListHandler()
+    handler.setFormatter(logcontext.Formatter())
+    logger.addHandler(handler)
+    return logger, handler
 
 
 @pytest.fixture
