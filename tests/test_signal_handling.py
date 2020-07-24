@@ -48,14 +48,14 @@ def run(Scheduler):
 
 async def test_return_before_abort(run):
     todo = [TJob('foo', async_sleep=0.1)]
-    with assert_elapsed_time(lambda t: t < 0.2):
-        done = await run(todo, abort_after=0.3)
+    with assert_elapsed_time(lambda t: t < 0.4):
+        done = await run(todo, abort_after=0.5)
     assert verify_tasks(done, {'foo': 'foo done'})
 
 
 async def test_abort_one_job_returns_immediately(run):
-    todo = [TJob('foo', async_sleep=0.3)]
-    with assert_elapsed_time(lambda t: t < 0.2):
+    todo = [TJob('foo', async_sleep=5)]
+    with assert_elapsed_time(lambda t: t < 1):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {'foo': Cancelled})
 
@@ -68,23 +68,21 @@ async def test_abort_one_job_in_thread_cannot_return_immediately(run):
 
 
 async def test_abort_one_job_in_subproc_returns_immediately(run):
-    todo = [TJob('foo', argv=mock_argv('sleep:30'))]
-    with assert_elapsed_time(lambda t: t < 0.3):
+    todo = [TJob('foo', argv=mock_argv('sleep:5'))]
+    with assert_elapsed_time(lambda t: t < 1):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {'foo': Cancelled})
 
 
 async def test_abort_one_spawned_job_returns_immediately(run):
-    todo = [
-        TJob('foo', spawn=[TJob('bar', async_sleep=0.3)], await_spawn=True)
-    ]
-    with assert_elapsed_time(lambda t: t < 0.2):
+    todo = [TJob('foo', spawn=[TJob('bar', async_sleep=5)], await_spawn=True)]
+    with assert_elapsed_time(lambda t: t < 1):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(done, {'foo': Cancelled, 'bar': Cancelled})
 
 
 async def test_abort_one_non_terminating_job_teminates_then_kills(run):
-    argv = mock_argv('ignore:SIGTERM', 'ignore:SIGINT', 'FOO', 'sleep:30')
+    argv = mock_argv('ignore:SIGTERM', 'ignore:SIGINT', 'FOO', 'sleep:5')
 
     async def coro(ctx):
         with ctx.tjob.subprocess_xevents(argv, result='kill'):
@@ -97,7 +95,7 @@ async def test_abort_one_non_terminating_job_teminates_then_kills(run):
                     await proc.wait()
 
     todo = [TJob('foo', coro=coro)]
-    with assert_elapsed_time(lambda t: t < 0.5):
+    with assert_elapsed_time(lambda t: t < 2):
         done = await run(todo)
     assert verify_tasks(done, {'foo': Cancelled})
     # assert False
@@ -107,7 +105,7 @@ async def test_abort_job_with_two_subprocs_terminates_both(run, num_workers):
     if num_workers < 2:
         pytest.skip('need Scheduler with at least 2 workers')
 
-    argv = mock_argv('sleep:30')
+    argv = mock_argv('sleep:5')
 
     async def coro(ctx):
         with ctx.tjob.subprocess_xevents(argv, result='terminate'):
@@ -118,7 +116,7 @@ async def test_abort_job_with_two_subprocs_terminates_both(run, num_workers):
                 await proc1.wait()
 
     todo = [TJob('foo', coro=coro)]
-    with assert_elapsed_time(lambda t: t < 0.5):
+    with assert_elapsed_time(lambda t: t < 1):
         done = await run(todo, abort_after=0.2)
     assert verify_tasks(done, {'foo': Cancelled})
 
@@ -127,8 +125,8 @@ async def test_abort_job_with_two_non_terminating_kills_both(run, num_workers):
     if num_workers < 2:
         pytest.skip('need Scheduler with at least 2 workers')
 
-    argv1 = mock_argv('ignore:SIGTERM', 'ignore:SIGINT', 'FOO', 'sleep:30')
-    argv2 = mock_argv('ignore:SIGTERM', 'ignore:SIGINT', 'BAR', 'sleep:30')
+    argv1 = mock_argv('ignore:SIGTERM', 'ignore:SIGINT', 'FOO', 'sleep:5')
+    argv2 = mock_argv('ignore:SIGTERM', 'ignore:SIGINT', 'BAR', 'sleep:5')
 
     async def coro(ctx):
         with ctx.tjob.subprocess_xevents(argv1, result='kill'):
@@ -148,14 +146,14 @@ async def test_abort_job_with_two_non_terminating_kills_both(run, num_workers):
                 await proc1.wait()
 
     todo = [TJob('foo', coro=coro)]
-    with assert_elapsed_time(lambda t: t < 1.0):
+    with assert_elapsed_time(lambda t: t < 1):
         done = await run(todo)
     assert verify_tasks(done, {'foo': Cancelled})
 
 
 async def test_abort_many_jobs_returns_immediately(num_jobs, run):
     todo = [TJob(f'foo #{i}', async_sleep=5) for i in range(num_jobs)]
-    with assert_elapsed_time(lambda t: t < 0.5):
+    with assert_elapsed_time(lambda t: t < 1):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(
         done, {f'foo #{i}': Cancelled for i in range(num_jobs)}
@@ -193,7 +191,7 @@ async def test_abort_many_spawned_jobs_returns_immediately(num_jobs, run):
             await_spawn=True,
         )
     ]
-    with assert_elapsed_time(lambda t: t < 0.3):
+    with assert_elapsed_time(lambda t: t < 1):
         done = await run(todo, abort_after=0.1)
     expect = {f'bar #{i}': Cancelled for i in range(100)}
     expect['foo'] = Cancelled
