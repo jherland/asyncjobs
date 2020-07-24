@@ -274,13 +274,11 @@ class ListHandler(logging.Handler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.records = []
+        self.messages = []
 
     def emit(self, record):
         self.records.append(record)
-
-    def messages(self):
-        for record in self.records:
-            yield self.format(record)
+        self.messages.append(self.format(record))
 
 
 @pytest.fixture(params=[1, 2, 4, 100])

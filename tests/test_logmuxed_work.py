@@ -343,7 +343,7 @@ async def test_decorated_output_with_custom_log_handler(run, verify_output):
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
-    assert sorted(test_handler.messages()) == sorted(job.log for job in todo)
+    assert sorted(test_handler.messages) == sorted(job.log for job in todo)
 
 
 async def test_decorated_output_with_custom_log_formatter(run, verify_output):
@@ -354,7 +354,7 @@ async def test_decorated_output_with_custom_log_formatter(run, verify_output):
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
-    assert sorted(test_handler.messages()) == sorted(
+    assert sorted(test_handler.messages) == sorted(
         f'<{job.log}>' for job in todo
     )
 
@@ -366,7 +366,7 @@ async def test_decorated_output_with_demux_formatter(run, verify_output):
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
-    assert sorted(test_handler.messages()) == sorted(
+    assert sorted(test_handler.messages) == sorted(
         f'<{job.log}>' for job in todo
     )
 
@@ -380,7 +380,7 @@ async def test_decorated_output_with_inherited_log_format(run, verify_output):
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
-    assert sorted(test_handler.messages()) == sorted(
+    assert sorted(test_handler.messages) == sorted(
         f'<{job.log}>' for job in todo
     )
 
@@ -396,7 +396,7 @@ async def test_decorated_output_w_inherited_root_formatter(run, verify_output):
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
-    assert sorted(test_handler.messages()) == sorted(
+    assert sorted(test_handler.messages) == sorted(
         f'<{job.log}>' for job in todo
     )
 
@@ -424,9 +424,9 @@ async def test_decorated_output_from_spawned_w_custom_log(run, verify_output):
         [job.xout() for job in [foo, bar, baz]],
         [job.xerr() for job in [foo, bar, baz]],
     )
-    assert list(foo_handler.messages()) == [foo.log]
-    assert list(bar_handler.messages()) == [bar.log]
-    assert list(baz_handler.messages()) == [baz.log]
+    assert foo_handler.messages == [foo.log]
+    assert bar_handler.messages == [bar.log]
+    assert baz_handler.messages == [baz.log]
 
 
 # decorated output from threads
@@ -460,7 +460,7 @@ async def test_decorated_output_from_thread_w_custom_log(run, verify_output):
     assert verify_output(
         [job.xout() for job in todo], [job.xerr() for job in todo],
     )
-    assert sorted(test_handler.messages()) == sorted(job.log for job in todo)
+    assert sorted(test_handler.messages) == sorted(job.log for job in todo)
 
 
 # decorated output from subprocesses

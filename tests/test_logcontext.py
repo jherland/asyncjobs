@@ -22,7 +22,7 @@ def test_LogContextDemuxer_no_context_uses_fallback_handler():
         test_logger.error('DURING')
     test_logger.error('AFTER')
 
-    assert list(root_handler.messages()) == ['BEFORE', 'DURING', 'AFTER']
+    assert root_handler.messages == ['BEFORE', 'DURING', 'AFTER']
 
 
 def test_LogContextDemuxer_handler_with_no_context_raises_RuntimeError():
@@ -40,8 +40,8 @@ def test_LogContextDemuxer_handler_with_no_context_raises_RuntimeError():
                 test_logger.error('DURING')
     test_logger.error('AFTER')
 
-    assert list(root_handler.messages()) == ['BEFORE', 'AFTER']
-    assert list(test_handler.messages()) == []
+    assert root_handler.messages == ['BEFORE', 'AFTER']
+    assert test_handler.messages == []
 
 
 def test_LogContextDemuxer_async_context_without_handler_uses_fallback():
@@ -59,7 +59,7 @@ def test_LogContextDemuxer_async_context_without_handler_uses_fallback():
         asyncio.run(coro())
         test_logger.error('AFTER')
 
-    assert list(root_handler.messages()) == ['BEFORE', 'DURING', 'AFTER']
+    assert root_handler.messages == ['BEFORE', 'DURING', 'AFTER']
 
 
 def test_LogContextDemuxer_async_context_uses_custom_handler():
@@ -79,8 +79,8 @@ def test_LogContextDemuxer_async_context_uses_custom_handler():
         asyncio.run(coro())
         test_logger.error('AFTER')
 
-    assert list(root_handler.messages()) == ['BEFORE', 'AFTER']
-    assert list(test_handler.messages()) == ['DURING']
+    assert root_handler.messages == ['BEFORE', 'AFTER']
+    assert test_handler.messages == ['DURING']
 
 
 def test_LogContextDemuxer_thread_context_without_handler_uses_fallback():
@@ -100,7 +100,7 @@ def test_LogContextDemuxer_thread_context_without_handler_uses_fallback():
         thread.join()
         test_logger.error('AFTER')
 
-    assert list(root_handler.messages()) == ['BEFORE', 'DURING', 'AFTER']
+    assert root_handler.messages == ['BEFORE', 'DURING', 'AFTER']
 
 
 def test_LogContextDemuxer_thread_context_uses_custom_handler():
@@ -122,8 +122,8 @@ def test_LogContextDemuxer_thread_context_uses_custom_handler():
         thread.join()
         test_logger.error('AFTER')
 
-    assert list(root_handler.messages()) == ['BEFORE', 'AFTER']
-    assert list(test_handler.messages()) == ['DURING']
+    assert root_handler.messages == ['BEFORE', 'AFTER']
+    assert test_handler.messages == ['DURING']
 
 
 # setting handler levels filters log records appropriately
@@ -145,7 +145,7 @@ def test_LogContextDemuxer_level_affects_fallback_handler():
     test_logger.error('AFTER')
     test_logger.warning('after')
 
-    assert list(root_handler.messages()) == [
+    assert root_handler.messages == [
         'BEFORE',
         'before',
         'DURING',
@@ -168,7 +168,7 @@ def test_LogContextDemuxer_obeys_fallback_handler_level():
     test_logger.error('AFTER')
     test_logger.warning('after')  # stopped by root_handler level
 
-    assert list(root_handler.messages()) == ['BEFORE', 'DURING', 'AFTER']
+    assert root_handler.messages == ['BEFORE', 'DURING', 'AFTER']
 
 
 def test_LogContextDemuxer_level_affects_custom_handler():
@@ -191,8 +191,8 @@ def test_LogContextDemuxer_level_affects_custom_handler():
         test_logger.error('AFTER')
         test_logger.warning('after')  # stopped by demux level
 
-    assert list(root_handler.messages()) == ['BEFORE', 'AFTER']
-    assert list(test_handler.messages()) == ['DURING']
+    assert root_handler.messages == ['BEFORE', 'AFTER']
+    assert test_handler.messages == ['DURING']
 
 
 def test_LogContextDemuxer_obeys_custom_handler_level():
@@ -215,13 +215,13 @@ def test_LogContextDemuxer_obeys_custom_handler_level():
         test_logger.error('AFTER')
         test_logger.warning('after')
 
-    assert list(root_handler.messages()) == [
+    assert root_handler.messages == [
         'BEFORE',
         'before',
         'AFTER',
         'after',
     ]
-    assert list(test_handler.messages()) == ['DURING']
+    assert test_handler.messages == ['DURING']
 
 
 # setting formatters formats log records appropriately
@@ -239,7 +239,7 @@ def test_LogContextDemuxer_no_context_uses_fallback_formatter():
         test_logger.error('DURING')
     test_logger.error('AFTER')
 
-    assert list(root_handler.messages()) == [
+    assert root_handler.messages == [
         'root<BEFORE>',
         'root<DURING>',
         'root<AFTER>',
@@ -264,8 +264,8 @@ def test_LogContextDemuxer_async_context_handler_uses_no_formatter():
         asyncio.run(coro())
         test_logger.error('AFTER')
 
-    assert list(root_handler.messages()) == ['root<BEFORE>', 'root<AFTER>']
-    assert list(test_handler.messages()) == ['DURING']
+    assert root_handler.messages == ['root<BEFORE>', 'root<AFTER>']
+    assert test_handler.messages == ['DURING']
 
 
 def test_LogContextDemuxer_async_context_handlers_uses_own_formatters():
@@ -295,9 +295,9 @@ def test_LogContextDemuxer_async_context_handlers_uses_own_formatters():
         asyncio.run(coro1())
         test_logger.error('END')
 
-    assert list(root_handler.messages()) == ['root<START>', 'root<END>']
-    assert list(test1_handler.messages()) == ['test1<BEFORE>', 'test1<AFTER>']
-    assert list(test2_handler.messages()) == ['test2<DURING>']
+    assert root_handler.messages == ['root<START>', 'root<END>']
+    assert test1_handler.messages == ['test1<BEFORE>', 'test1<AFTER>']
+    assert test2_handler.messages == ['test2<DURING>']
 
 
 def test_LogContextDemuxer_thread_context_handlers_uses_own_formatters():
@@ -331,9 +331,9 @@ def test_LogContextDemuxer_thread_context_handlers_uses_own_formatters():
         thread.join()
         test_logger.error('END')
 
-    assert list(root_handler.messages()) == ['root<START>', 'root<END>']
-    assert list(test1_handler.messages()) == ['test1<BEFORE>', 'test1<AFTER>']
-    assert list(test2_handler.messages()) == ['test2<DURING>']
+    assert root_handler.messages == ['root<START>', 'root<END>']
+    assert test1_handler.messages == ['test1<BEFORE>', 'test1<AFTER>']
+    assert test2_handler.messages == ['test2<DURING>']
 
 
 def test_LogContextDemuxer_async_context_handlers_inherit_demux_formatter():
@@ -363,9 +363,9 @@ def test_LogContextDemuxer_async_context_handlers_inherit_demux_formatter():
         asyncio.run(coro1())
         test_logger.error('END')
 
-    assert list(root_handler.messages()) == ['root<START>', 'root<END>']
-    assert list(test1_handler.messages()) == ['test1<BEFORE>', 'test1<AFTER>']
-    assert list(test2_handler.messages()) == ['demux<DURING>']
+    assert root_handler.messages == ['root<START>', 'root<END>']
+    assert test1_handler.messages == ['test1<BEFORE>', 'test1<AFTER>']
+    assert test2_handler.messages == ['demux<DURING>']
 
 
 def test_LogContextDemuxer_can_copy_formatter_from_fallback_and_propagate():
@@ -395,6 +395,6 @@ def test_LogContextDemuxer_can_copy_formatter_from_fallback_and_propagate():
         asyncio.run(coro1())
         test_logger.error('END')
 
-    assert list(root_handler.messages()) == ['root<START>', 'root<END>']
-    assert list(test1_handler.messages()) == ['test1<BEFORE>', 'test1<AFTER>']
-    assert list(test2_handler.messages()) == ['root<DURING>']
+    assert root_handler.messages == ['root<START>', 'root<END>']
+    assert test1_handler.messages == ['test1<BEFORE>', 'test1<AFTER>']
+    assert test2_handler.messages == ['root<DURING>']
