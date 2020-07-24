@@ -399,13 +399,13 @@ def logger_with_listhandler():
 
 
 @pytest.fixture
-def verify_output(capfd):
+def verify_output(capfd, logger_with_listhandler):
     def _verify_one_output(expect_lines_from_streams, actual_text):
-        logger.debug(
-            f'Verifying {actual_text!r} against {expect_lines_from_streams}'
-        )
         actual_lines = actual_text.split('\n')
-        assert actual_lines.pop() == ''
+        logger.debug(
+            f'Verifying {actual_lines} against {expect_lines_from_streams}'
+        )
+        assert actual_lines.pop() == ''  # last line was terminated
         for actual_line in actual_lines:
             # Expect this line is the next line from one of our streams
             expected = set()
@@ -422,11 +422,19 @@ def verify_output(capfd):
             if len(e):
                 assert False, f'expected lines not found: {e!r}'
 
-    def _verify_output(expect_stdout_streams, expect_stderr_streams=None):
+    def _verify_output(
+        expect_stdout_streams,
+        expect_stderr_streams=None,
+        expect_log_streams=None,
+    ):
         actual = capfd.readouterr()
         _verify_one_output(expect_stdout_streams, actual.out)
         if expect_stderr_streams is not None:
             _verify_one_output(expect_stderr_streams, actual.err)
+        if expect_log_streams is not None:
+            _, listhandler = logger_with_listhandler
+            actual_log = ''.join(msg + '\n' for msg in listhandler.messages)
+            _verify_one_output(expect_log_streams, actual_log)
         return True
 
     return _verify_output

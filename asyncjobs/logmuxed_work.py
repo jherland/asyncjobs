@@ -8,7 +8,7 @@ from . import external_work, logcontext, logmux
 logger = logging.getLogger(__name__)
 
 
-def redirected_job(decorate_out=None, decorate_err=None, log_handler=True):
+def redirected_job(decorate_out=None, decorate_err=None, decorate_log=None):
     """Setup stdout/stderr redirection for the given coroutine.
 
     This is the same as wrapping the entire coroutine in:
@@ -38,7 +38,7 @@ def redirected_job(decorate_out=None, decorate_err=None, log_handler=True):
             with ctx.redirect(
                 decorate_out=decorate_out,
                 decorate_err=decorate_err,
-                log_handler=log_handler,
+                decorate_log=decorate_log,
             ):
                 return await coro(ctx)
 
@@ -62,36 +62,22 @@ class Context(external_work.Context):
     self.stderr as context managers).
     """
 
-    @staticmethod
-    def default_log_handler_factory(ctx):
-        return logging.StreamHandler(ctx.stderr.open())
-
     def __init__(self, *args):
         super().__init__(*args)
         self.stdout = None
         self.stderr = None
-        self.log_handler_factory = self.default_log_handler_factory
-
-    @contextlib.contextmanager
-    def _log_context(self, handler):
-        if handler is True:
-            handler = self.log_handler_factory(self)
-        elif handler is False:
-            handler = None
-
-        assert handler is None or isinstance(handler, logging.Handler)
-        with self._scheduler.log_demuxer.context_handler(handler):
-            yield handler
 
     @contextlib.contextmanager
     def redirect(
-        self, *, decorate_out=None, decorate_err=None, log_handler=True
+        self, *, decorate_out=None, decorate_err=None, decorate_log=None,
     ):
+        if decorate_log is True:
+            decorate_log = decorate_err
         assert self.stdout is None and self.stderr is None
         try:
             self.stdout = self._scheduler.outmux.new_stream(decorate_out)
             self.stderr = self._scheduler.errmux.new_stream(decorate_err)
-            with self._log_context(log_handler):
+            with logcontext.Decorator.use(decorate_log):
                 yield
         finally:
             if self.stdout is not None:
@@ -101,12 +87,14 @@ class Context(external_work.Context):
                 self.stderr.close()
                 self.stderr = None
 
-    async def call_in_thread(self, func, *args, log_handler=True):
-        """Call func(*args) in a worker thread and await its result."""
+    async def call_in_thread(self, func, *args):
+        # Apply current log context to thread
+        decorator = logcontext.Decorator.get(logcontext.current_context())
+        assert decorator is None or callable(decorator)
 
         @functools.wraps(func)
         def call_func_in_log_context(*args):
-            with self._log_context(log_handler):
+            with logcontext.Decorator.use(decorator):
                 return func(*args)
 
         return await super().call_in_thread(call_func_in_log_context, *args)
@@ -135,19 +123,10 @@ class Scheduler(external_work.Scheduler):
     """
 
     def __init__(
-        self,
-        *,
-        outmux=None,
-        errmux=None,
-        log_demuxer=None,
-        log_formatter=None,
-        context_class=Context,
-        **kwargs,
+        self, *, outmux=None, errmux=None, context_class=Context, **kwargs,
     ):
         self.outmux = outmux
         self.errmux = errmux
-        self.log_demuxer = log_demuxer
-        self.log_formatter = log_formatter
 
         assert issubclass(context_class, Context)
         super().__init__(context_class=context_class, **kwargs)
@@ -157,14 +136,7 @@ class Scheduler(external_work.Scheduler):
             self.outmux = logmux.LogMux(sys.stdout)
         if self.errmux is None:
             self.errmux = logmux.LogMux(sys.stderr)
-        if self.log_demuxer is None:
-            self.log_demuxer = logcontext.LogContextDemuxer()
-        assert isinstance(self.log_demuxer, logcontext.LogContextDemuxer)
-        copy_formatter = self.log_formatter is True
-        if isinstance(self.log_formatter, logging.Formatter):
-            self.log_demuxer.setFormatter(self.log_formatter)
 
         logger.debug('Starting LogMux instances…')
         with self.outmux, self.errmux:
-            with self.log_demuxer.installed(copy_formatter=copy_formatter):
-                await super()._run_tasks(*args, **kwargs)
+            await super()._run_tasks(*args, **kwargs)
