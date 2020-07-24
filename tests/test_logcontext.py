@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import logging
 import pytest
 import threading
@@ -6,6 +7,92 @@ import threading
 from asyncjobs import logcontext
 
 from conftest import ListHandler
+
+
+def setup_test_logger(fmt=None):
+    logger = logging.getLogger('test')
+    handler = ListHandler()
+    handler.setFormatter(logcontext.Formatter(fmt))
+    logger.addHandler(handler)
+    return logger, handler
+
+
+def run_in_no_context(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+
+def run_in_async_context(func, *args, **kwargs):
+    async def coro():
+        return func(*args, **kwargs)
+
+    return asyncio.run(coro())
+
+
+def run_in_thread_context(func, *args, **kwargs):
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(func, *args, **kwargs)
+        return future.result()
+
+
+@pytest.fixture
+def no_context():
+    return run_in_no_context
+
+
+@pytest.fixture
+def async_context():
+    return run_in_async_context
+
+
+@pytest.fixture
+def thread_context():
+    return run_in_thread_context
+
+
+@pytest.fixture(
+    params=[run_in_no_context, run_in_async_context, run_in_thread_context]
+)
+def any_context(request):
+    return request.param
+
+
+# Formatter
+
+
+def test_formatter_with_no_decorators_does_not_decorate(any_context):
+    logger, handler = setup_test_logger()
+    any_context(logger.error, 'FOO')
+    assert handler.messages == ['FOO']
+
+
+def test_formatter_with_unrelated_decorator_does_not_decorate(any_context):
+    logger, handler = setup_test_logger()
+    with logcontext.Decorator.use(lambda line: f'>>>{line}<<<', 12345):
+        any_context(logger.error, 'FOO')
+    assert handler.messages == ['FOO']
+
+
+def test_formatter_with_default_decorator_only_in_no_context(any_context):
+    logger, handler = setup_test_logger()
+
+    def in_context():
+        with logcontext.Decorator.use(lambda line: f'>>>{line}<<<', None):
+            logger.error('FOO')
+
+    any_context(in_context)
+    expect = ['>>>FOO<<<'] if any_context is run_in_no_context else ['FOO']
+    assert handler.messages == expect
+
+
+def test_formatter_with_context_decorator_decorates_in_context(any_context):
+    logger, handler = setup_test_logger()
+
+    def in_context():
+        with logcontext.Decorator.use(lambda line: f'>>>{line}<<<'):
+            logger.error('FOO')
+
+    any_context(in_context)
+    assert handler.messages == ['>>>FOO<<<']
 
 
 # LogContextDemuxer forwards log records to appropriate handler
