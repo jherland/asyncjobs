@@ -8,7 +8,7 @@ from conftest import adjusted_logger_level, verify_tasks
 
 
 async def job_coro(ctx):
-    async with ctx.redirect(
+    with ctx.redirect(
         decorate_out=f'{ctx.name}/out: ', decorate_err=f'{ctx.name}/ERR: ',
     ):
         with ctx.stdout as outf, ctx.stderr as errf:

@@ -125,7 +125,7 @@ class TJob(TExternalWorkJob):
             return handler
 
         ctx.log_handler_factory = only_errors
-        async with ctx.redirect(
+        with ctx.redirect(
             decorate_out=f'{self.name}/out: ' if self.decorate else None,
             decorate_err=f'{self.name}/ERR: ' if self.decorate else None,
             log_handler=self.log_handler,

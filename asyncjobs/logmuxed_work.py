@@ -13,7 +13,7 @@ def redirected_job(decorate_out=None, decorate_err=None, log_handler=True):
 
     This is the same as wrapping the entire coroutine in:
 
-        async with ctx.redirect(...):
+        with ctx.redirect(...):
             ...
 
     Use as a decorator:
@@ -35,7 +35,7 @@ def redirected_job(decorate_out=None, decorate_err=None, log_handler=True):
     def wrap(coro):
         @functools.wraps(coro)
         async def wrapped_coro(ctx):
-            async with ctx.redirect(
+            with ctx.redirect(
                 decorate_out=decorate_out,
                 decorate_err=decorate_err,
                 log_handler=log_handler,
@@ -83,8 +83,8 @@ class Context(external_work.Context):
         with self._scheduler.log_demuxer.context_handler(handler):
             yield handler
 
-    @contextlib.asynccontextmanager
-    async def redirect(
+    @contextlib.contextmanager
+    def redirect(
         self, *, decorate_out=None, decorate_err=None, log_handler=True
     ):
         assert self.stdout is None and self.stderr is None
