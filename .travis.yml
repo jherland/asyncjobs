@@ -8,4 +8,4 @@ python:
 install:
   - pip install ".[test]"
 script:
-  - pytest -x --log-level=debug -v --durations=0
+  - pytest -rxXs --log-level=debug -v --durations=10

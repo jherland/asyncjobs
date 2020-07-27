@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from subprocess import PIPE
 import time
@@ -167,16 +168,29 @@ async def test_abort_many_jobs_in_threads_cannot_return_soon(num_jobs, run):
     ]
     with assert_elapsed_time(lambda t: t > 0.3):  # must wait for all threads
         done = await run(todo, abort_after=0.1)
+
+    # In some scenarios it seems a few jobs manage to successfully complete
+    # before we get around to aborting the rest.
+    def cancelled_xor_successful(task):
+        try:
+            if task.result() is None:
+                return True
+        except asyncio.CancelledError:
+            return True
+        except BaseException:
+            pass
+        return False
+
     assert verify_tasks(
-        done, {f'foo #{i}': Cancelled for i in range(num_jobs)}
+        done, {f'foo #{i}': cancelled_xor_successful for i in range(num_jobs)}
     )
 
 
 async def test_abort_many_jobs_in_subprocs_returns_immediately(num_jobs, run):
     todo = [
-        TJob(f'foo #{i}', argv=mock_argv('sleep:10')) for i in range(num_jobs)
+        TJob(f'foo #{i}', argv=mock_argv('sleep:30')) for i in range(num_jobs)
     ]
-    with assert_elapsed_time(lambda t: t < 5.0):
+    with assert_elapsed_time(lambda t: t < 10.0):
         done = await run(todo, abort_after=0.1)
     assert verify_tasks(
         done, {f'foo #{i}': Cancelled for i in range(num_jobs)}
