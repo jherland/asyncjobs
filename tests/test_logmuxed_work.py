@@ -600,7 +600,7 @@ async def test_decorated_output_from_many_subprocesses(
 # on systems with 1024 fds available). Limit number of jobs to _half_ the
 # number of available fds to reliably trigger test failures when we open
 # too many fds concurrently.
-exhaust_fd_jobs = resource.getrlimit(resource.RLIMIT_NOFILE)[0] // 4
+fd_limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
 
 
 async def test_provoke_too_many_open_files(num_workers, run):
@@ -617,7 +617,7 @@ async def test_provoke_too_many_open_files(num_workers, run):
             return False
         return e.args == (24, 'Too many open files')
 
-    todo = [TJob(f'job #{i}') for i in range(exhaust_fd_jobs)]
+    todo = [TJob(f'job #{i}') for i in range(fd_limit // 4)]
     done = await run(todo)
     assert verify_tasks(
         done, {job.name: task_cancelled_or_failed_with_EMFILE for job in todo}
@@ -633,7 +633,7 @@ async def test_logging_only_does_not_exhaust_open_files(
     async def coro(ctx):
         testlogger.error(ctx.tjob.log)
 
-    todo = [TJob(f'job #{i}', coro=coro) for i in range(exhaust_fd_jobs)]
+    todo = [TJob(f'job #{i}', coro=coro) for i in range(fd_limit // 4)]
     done = await run(todo)
     assert all(t.done() and t.result() is None for t in done.values())
     assert verify_output([], [], [job.xlog() for job in todo])  # no stdout/err
@@ -650,7 +650,7 @@ async def test_use_reserve_worker_to_limit_open_fifos(
         async with ctx.reserve_worker():
             return await ctx.tjob.do_async(ctx)
 
-    todo = [TJob(f'job #{i}', coro=coro) for i in range(exhaust_fd_jobs)]
+    todo = [TJob(f'job #{i}', coro=coro) for i in range(fd_limit // 4)]
     done = await run(todo, check_events=False)
     assert all(t.done() and t.result() is None for t in done.values())
     assert verify_output(
@@ -665,8 +665,10 @@ async def test_use_threads_to_limit_open_fifos(
 ):
     if num_workers < 10:
         pytest.skip('not worth running on Schedulers with few workers')
+    if fd_limit > 1024:
+        pytest.skip(f'skip trying to exhaust {fd_limit} file descriptors')
 
-    todo = [TJob(f'job #{i}', mode='thread') for i in range(exhaust_fd_jobs)]
+    todo = [TJob(f'job #{i}', mode='thread') for i in range(fd_limit // 4)]
     done = await run(todo, check_events=False)
     assert all(t.done() and t.result() is None for t in done.values())
     assert verify_output(
@@ -681,11 +683,13 @@ async def test_use_subprocesses_to_limit_open_fifos(
 ):
     if num_workers < 10:
         pytest.skip('not worth running on Schedulers with few workers')
+    if fd_limit > 1024:
+        pytest.skip(f'skip trying to exhaust {fd_limit} file descriptors')
 
     async def coro(ctx):
         return await ctx.run_in_subprocess(['true'])
 
-    todo = [TJob(f'job #{i}', coro=coro) for i in range(exhaust_fd_jobs)]
+    todo = [TJob(f'job #{i}', coro=coro) for i in range(fd_limit // 4)]
     done = await run(todo, check_events=False)
     assert all(t.done() and t.result() == 0 for t in done.values())
     assert verify_output([], [])  # no output from `true`
