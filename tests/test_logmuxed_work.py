@@ -600,7 +600,7 @@ async def test_decorated_output_from_many_subprocesses(
 # on systems with 1024 fds available). Limit number of jobs to _half_ the
 # number of available fds to reliably trigger test failures when we open
 # too many fds concurrently.
-exhaust_fd_jobs = resource.getrlimit(resource.RLIMIT_NOFILE)[0] // 2
+exhaust_fd_jobs = resource.getrlimit(resource.RLIMIT_NOFILE)[0] // 4
 
 
 async def test_provoke_too_many_open_files(num_workers, run):
