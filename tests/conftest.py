@@ -189,9 +189,10 @@ class TExternalWorkJob(TBasicJob):
             return await ctx.run_in_subprocess(argv, check=True)
 
     @contextlib.contextmanager
-    def thread_xevents(self):
-        self.xevents.add('await worker slot')
-        self.xevents.add('awaited worker slot', may_cancel=True)
+    def thread_xevents(self, reuse_ticket=False):
+        if not reuse_ticket:
+            self.xevents.add('await worker slot')
+            self.xevents.add('awaited worker slot', may_cancel=True)
         self.xevents.add(
             'start work in thread', func=Whatever, may_cancel=True
         )
@@ -208,9 +209,12 @@ class TExternalWorkJob(TBasicJob):
             raise
 
     @contextlib.contextmanager
-    def subprocess_xevents(self, argv, result=None, may_cancel=False):
-        self.xevents.add('await worker slot')
-        self.xevents.add('awaited worker slot', may_cancel=may_cancel)
+    def subprocess_xevents(
+        self, argv, result=None, may_cancel=False, reuse_ticket=False
+    ):
+        if not reuse_ticket:
+            self.xevents.add('await worker slot')
+            self.xevents.add('awaited worker slot', may_cancel=may_cancel)
         self.xevents.add(
             'start work in subprocess', argv=argv, may_cancel=may_cancel
         )
@@ -367,6 +371,9 @@ def verify_tasks(tasks, expects):
                 fail(name, expect.__class__, type(e))
             if e.args != expect.args:
                 fail(name, expect.args, e.args)
+        elif callable(expect):  # verify by passing task to predicate
+            if not expect(task):
+                fail(name, f'{expect}({task}) failed')
         else:
             if task.result() != expect:
                 fail(name, expect, task.result())

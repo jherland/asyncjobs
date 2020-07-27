@@ -2,6 +2,7 @@ import asyncio
 import os
 from pathlib import Path
 import pytest
+import re
 from subprocess import CalledProcessError, PIPE, STDOUT
 import time
 
@@ -315,15 +316,63 @@ async def test_killing_subprocess_w_check_raises_CalledProcessError(run):
 # multiple threads/subprocesses from a single job
 
 
+async def test_two_threads_sequentially_on_same_ticket_succeeds(run):
+    def func(ret):
+        time.sleep(0.001)
+        return ret
+
+    async def coro(ctx):
+        async with ctx.reserve_worker() as ticket:
+            with ctx.tjob.thread_xevents():
+                result = await ctx.call_in_thread(func, 'FOO', ticket=ticket)
+            with ctx.tjob.thread_xevents(reuse_ticket=True):
+                result += await ctx.call_in_thread(func, 'BAR', ticket=ticket)
+            return result
+
+    job = TJob('foo', coro=coro)
+    done = await run([job])
+    assert verify_tasks(done, {'foo': 'FOOBAR'})
+
+
+def expect_ValueError_already_in_use(task):
+    if not isinstance(task.exception(), ValueError):
+        return False
+    (msg,) = task.exception().args
+    return re.match(r'Cannot use ticket \d+: Already in use$', msg)
+
+
+async def test_two_threads_concurrently_on_same_ticket_fails(run):
+    def func(ret):
+        time.sleep(0.001)
+        return ret
+
+    async def coro(ctx):
+        async with ctx.reserve_worker() as ticket:
+            with ctx.tjob.thread_xevents():  # Only one thread started
+                results = await asyncio.gather(
+                    ctx.call_in_thread(func, 'FOO', ticket=ticket),
+                    ctx.call_in_thread(func, 'BAR', ticket=ticket),
+                    return_exceptions=True,
+                )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
+            return results
+
+    job = TJob('foo', coro=coro)
+    done = await run([job])
+    assert verify_tasks(done, {'foo': expect_ValueError_already_in_use})
+
+
 async def test_two_threads_concurrently(run, num_workers):
-    def thread_func(ret):
-        time.sleep(0.1)
+    def func(ret):
+        time.sleep(0.01)
         return ret
 
     async def coro(ctx):
         results = await asyncio.gather(
-            ctx.call_in_thread(thread_func, 'FOO'),
-            ctx.call_in_thread(thread_func, 'BAR'),
+            ctx.call_in_thread(func, 'FOO'),
+            ctx.call_in_thread(func, 'BAR'),
             return_exceptions=True,
         )
         for result in results:
@@ -332,10 +381,10 @@ async def test_two_threads_concurrently(run, num_workers):
         return results
 
     job = TJob('foo', coro=coro)
-    if num_workers < 2:  # Cannot allocate second worker
+    if num_workers < 2:  # Cannot reserve second worker
         with job.thread_xevents():  # Only one thread started
             expect_result = RuntimeError(
-                f'Cannot allocate >={num_workers} worker(s) from job foo!'
+                f'Cannot reserve >={num_workers} worker(s)!'
             )
     else:
         with job.thread_xevents():
@@ -343,6 +392,45 @@ async def test_two_threads_concurrently(run, num_workers):
                 expect_result = ['FOO', 'BAR']
     done = await run([job])
     assert verify_tasks(done, {'foo': expect_result})
+
+
+async def test_two_subprocesses_sequentially_on_same_ticket_succeeds(run):
+    argv = mock_argv()
+
+    async def coro(ctx):
+        async with ctx.reserve_worker() as ticket:
+            with ctx.tjob.subprocess_xevents(argv, result=0):
+                result = await ctx.run_in_subprocess(argv, ticket=ticket)
+            with ctx.tjob.subprocess_xevents(
+                argv, result=0, reuse_ticket=True
+            ):
+                result += await ctx.run_in_subprocess(argv, ticket=ticket)
+            return result
+
+    job = TJob('foo', coro=coro)
+    done = await run([job])
+    assert verify_tasks(done, {'foo': 0})
+
+
+async def test_two_subprocesses_concurrently_on_same_ticket_fails(run):
+    argv = mock_argv()
+
+    async def coro(ctx):
+        async with ctx.reserve_worker() as ticket:
+            with ctx.tjob.subprocess_xevents(argv, result=0):  # Only one
+                results = await asyncio.gather(
+                    ctx.run_in_subprocess(argv, ticket=ticket),
+                    ctx.run_in_subprocess(argv, ticket=ticket),
+                    return_exceptions=True,
+                )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
+            return results
+
+    job = TJob('foo', coro=coro)
+    done = await run([job])
+    assert verify_tasks(done, {'foo': expect_ValueError_already_in_use})
 
 
 async def test_two_subprocesses_concurrently(run, num_workers):
@@ -360,10 +448,10 @@ async def test_two_subprocesses_concurrently(run, num_workers):
         return results
 
     job = TJob('foo', coro=coro)
-    if num_workers < 2:  # Cannot allocate second worker
+    if num_workers < 2:  # Cannot reserve second worker
         with job.subprocess_xevents(argv, result=0):  # Only one subprocess
             expect_result = RuntimeError(
-                f'Cannot allocate >={num_workers} worker(s) from job foo!'
+                f'Cannot reserve >={num_workers} worker(s)!'
             )
     else:
         with job.subprocess_xevents(argv, result=0):
@@ -387,10 +475,10 @@ async def test_two_subprocesses_with_output_concurrently(run, num_workers):
         return output1 + output2
 
     job = TJob('foo', coro=coro)
-    if num_workers < 2:  # Cannot allocate second worker
+    if num_workers < 2:  # Cannot reserve second worker
         with job.subprocess_xevents(argv1, result='terminate'):
             expect_result = RuntimeError(
-                f'Cannot allocate >={num_workers} worker(s) from job foo!'
+                f'Cannot reserve >={num_workers} worker(s)!'
             )
     else:
         with job.subprocess_xevents(argv1, result=0):

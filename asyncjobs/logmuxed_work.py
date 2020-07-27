@@ -87,31 +87,36 @@ class Context(external_work.Context):
                 self.stderr.close()
                 self.stderr = None
 
-    async def call_in_thread(self, func, *args):
+    async def call_in_thread(self, func, *args, **kwargs):
         # Apply current log context to thread
         decorator = logcontext.Decorator.get(logcontext.current_context())
         assert decorator is None or callable(decorator)
 
         @functools.wraps(func)
-        def call_func_in_log_context(*args):
+        def wrapper(*args):
             with logcontext.Decorator.use(decorator):
                 return func(*args)
 
-        return await super().call_in_thread(call_func_in_log_context, *args)
+        return await super().call_in_thread(wrapper, *args, **kwargs)
 
     @contextlib.asynccontextmanager
-    async def subprocess(self, argv, **kwargs):
+    async def subprocess(
+        self, argv, stdout=None, stderr=None, ticket=None, **kwargs
+    ):
         """Pass redirected out/err as stdout/stderr to the subprocess.
 
         Only if stdout/stderr is not already customized by the caller.
         """
-        with contextlib.ExitStack() as stack:
-            if kwargs.get('stdout') is None:
-                kwargs['stdout'] = stack.enter_context(self.stdout)
-            if kwargs.get('stderr') is None:
-                kwargs['stderr'] = stack.enter_context(self.stderr)
-            async with super().subprocess(argv, **kwargs) as proc:
-                yield proc
+        async with self._use_ticket(ticket, only_reserve=True) as ticket:
+            with contextlib.ExitStack() as stack:
+                if stdout is None:
+                    stdout = stack.enter_context(self.stdout)
+                if stderr is None:
+                    stderr = stack.enter_context(self.stderr)
+                async with super().subprocess(
+                    argv, stdout=stdout, stderr=stderr, ticket=ticket, **kwargs
+                ) as proc:
+                    yield proc
 
 
 class Scheduler(external_work.Scheduler):

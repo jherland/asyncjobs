@@ -12,9 +12,18 @@ logger = logging.getLogger(__name__)
 class Context(basic.Context):
     """Extend Context with helpers for doing work in threads + processes."""
 
+    _next_worker_ticket = 0
+
+    @classmethod
+    def next_worker_ticket(cls):
+        ret = cls._next_worker_ticket
+        cls._next_worker_ticket += 1
+        return ret
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._workers_in_use = 0
+        self._workers_reserved = set()
+        self._workers_in_use = set()
 
     @contextlib.asynccontextmanager
     async def reserve_worker(self):
@@ -25,30 +34,53 @@ class Context(basic.Context):
         another thread or process to perform some work should use this context
         manager to await a free "slot".
 
+        Yields a worker "ticket" into the context, which can be passed to other
+        methods that would otherwise need to reserve their own worker ticket.
+
         If a single job tries to reserve more concurrent workers than allowed
         by Scheduler.workers, a RuntimeError will be raised.
         """
-        if self._workers_in_use >= self._scheduler.workers:
-            raise RuntimeError(
-                'Cannot allocate >={} worker(s) from job {}!'.format(
-                    self._scheduler.workers, self.name
-                )
-            )
-        self._workers_in_use += 1
-        logger.debug(f'{self.name} -> acquiring worker semaphore…')
+        max_reserve = self._scheduler.workers
+        if len(self._workers_reserved) >= max_reserve:
+            raise RuntimeError(f'Cannot reserve >={max_reserve} worker(s)!')
+        logger.debug(f'{self.name} -> acquiring worker ticket…')
         self.event('await worker slot')
         async with self._scheduler.worker_semaphore:
+            ticket = self.next_worker_ticket()
+            self._workers_reserved.add(ticket)
             self.event('awaited worker slot')
-            logger.debug(f'{self.name} -- acquired worker semaphore')
+            logger.debug(f'{self.name} -- acquired worker ticket {ticket}')
             try:
-                yield
+                yield ticket
             finally:
-                logger.debug(f'{self.name} <- releasing worker semaphore')
-                self._workers_in_use -= 1
+                self._workers_reserved.remove(ticket)
+                logger.debug(f'{self.name} <- released worker ticket {ticket}')
 
-    async def call_in_thread(self, func, *args):
-        """Call func(*args) in a worker thread and await its result."""
-        async with self.reserve_worker():
+    @contextlib.asynccontextmanager
+    async def _use_ticket(self, ticket=None, only_reserve=False):
+        """Reuse the given worker ticket or reserve a new one."""
+        if ticket is None:  # issue new ticket
+            async with self.reserve_worker() as ticket:
+                yield ticket
+        else:  # verify ticket
+            if ticket not in self._workers_reserved:
+                raise ValueError(f'Cannot use ticket {ticket}: Not reserved')
+            elif ticket in self._workers_in_use:
+                raise ValueError(f'Cannot use ticket {ticket}: Already in use')
+            try:
+                if not only_reserve:
+                    self._workers_in_use.add(ticket)
+                yield ticket
+            finally:
+                if not only_reserve:
+                    self._workers_in_use.remove(ticket)
+
+    async def call_in_thread(self, func, *args, ticket=None):
+        """Call func(*args) in a worker thread and await its result.
+
+        Reuse worker ticket if given, otherwise reserve a new ticket.
+        """
+        async with self._use_ticket(ticket):
             try:
                 logger.debug(f'{self.name} -> start {func} in worker thread…')
                 self.event('start work in thread', func=str(func))
@@ -93,7 +125,9 @@ class Context(basic.Context):
                 await self.terminate_subprocess(proc, argv, delay, kill=True)
 
     @contextlib.asynccontextmanager
-    async def subprocess(self, argv, *, check=False, kill_delay=3, **kwargs):
+    async def subprocess(
+        self, argv, *, check=False, kill_delay=3, ticket=None, **kwargs
+    ):
         """Run a command line in a subprocess and interact with it.
 
         This context manager yields the asyncio.subprocess.Process instance
@@ -110,8 +144,10 @@ class Context(basic.Context):
         non-zero exit code (this includes the case where we have to kill it),
         we will raise subprocess.CalledProcessError. Otherwise, a non-zero exit
         code is not considered exceptional.
+
+        Reuse worker ticket if given, otherwise reserve a new ticket.
         """
-        async with self.reserve_worker():
+        async with self._use_ticket(ticket):
             logger.debug(f'{self.name} -> start {argv} in subprocess…')
             self.event('start work in subprocess', argv=argv)
             proc = await asyncio.create_subprocess_exec(*argv, **kwargs)
