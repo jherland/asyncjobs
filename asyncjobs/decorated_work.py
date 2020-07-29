@@ -112,6 +112,27 @@ class Context(external_work.Context):
                 self.stderr.close()
                 self.stderr = None
 
+    @contextlib.contextmanager
+    def follow_file(self, path, use_stderr=False, period=0.1):
+        """Echo the given file to self.stdout (or self.stderr).
+
+        This sets up a StreamMux poller to periodically check for new content
+        and echo lines from the given file. By default, the self.stdout mux
+        (and decorator) is used, but pass use_stderr=True to use the
+        self.stderr mux (and decorator) instead.
+
+        This will only work inside the above .decoration() context, otherwise
+        a RuntimeError is raised.
+
+        Lines read from 'path' will be passed through 'decorator' before being
+        written to this StreamMux' shared output.
+        """
+        stream = self.stderr if use_stderr else self.stdout
+        if stream is None:
+            raise RuntimeError('Cannot follow file outside decoration context')
+        with stream.mux.follow_file(path, stream.decorator, period=period):
+            yield
+
     async def call_in_thread(self, func, *args, **kwargs):
         """Apply the current log context (if any) to threaded function call."""
         decorator = logcontext.Decorator.get(logcontext.current_context())

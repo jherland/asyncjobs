@@ -201,9 +201,11 @@ class TJob(TUndecoratedJob):
         with ctx.stdout as outf, ctx.stderr as errf:
             return await super().do_async(ctx, outf, errf)
 
-    async def do_thread(self, ctx):
+    async def do_thread(self, ctx, out_stream=None, err_stream=None):
+        out_stream = ctx.stdout if out_stream is None else out_stream
+        err_stream = ctx.stderr if err_stream is None else err_stream
         async with ctx.reserve_worker() as ticket:
-            with ctx.stdout as outf, ctx.stderr as errf:
+            with out_stream as outf, err_stream as errf:
                 return await super().do_thread(ctx, outf, errf, ticket)
 
 
@@ -284,6 +286,20 @@ async def test_undecorated_linewise_output_from_two_jobs(run, verify_output):
         [job.xerr() for job in todo],
         [job.xlog() for job in todo],
     )
+
+
+async def test_undecorated_follow_file_to_stdout(tmp_path, run, verify_output):
+    lines = ['first line', 'second line', 'third line']
+    path = tmp_path / 'file'
+    path.write_text(''.join(line + '\n' for line in lines))
+
+    async def coro(ctx):
+        with ctx.follow_file(path):
+            pass
+
+    todo = TJob('foo', coro=coro, decorate=False)
+    await run([todo])
+    assert verify_output([lines], [], [])
 
 
 # decorated output
@@ -377,6 +393,34 @@ async def test_decorated_output_from_spawned_jobs(run, verify_output):
     )
 
 
+async def test_decorated_follow_file_to_stdout(tmp_path, run, verify_output):
+    lines = ['first line', 'second line', 'third line']
+    path = tmp_path / 'file'
+    path.write_text(''.join(line + '\n' for line in lines))
+
+    async def coro(ctx):
+        with ctx.follow_file(path):
+            pass
+
+    todo = TJob('foo', coro=coro)
+    await run([todo])
+    assert verify_output([[f'foo/out: {line}' for line in lines]], [], [])
+
+
+async def test_decorated_follow_file_to_stderr(tmp_path, run, verify_output):
+    lines = ['first line', 'second line', 'third line']
+    path = tmp_path / 'file'
+    path.write_text(''.join(line + '\n' for line in lines))
+
+    async def coro(ctx):
+        with ctx.follow_file(path, use_stderr=True):
+            pass
+
+    todo = TJob('foo', coro=coro)
+    await run([todo])
+    assert verify_output([], [[f'foo/ERR: {line}' for line in lines]], [])
+
+
 # decorated output from threads
 
 
@@ -390,11 +434,53 @@ async def test_decorated_output_from_thread(run, verify_output):
     )
 
 
+async def test_decorated_output_from_thread_via_follow_file(
+    tmp_path, run, verify_output
+):
+    # Use TJob.do_thread(), but redirect to files instead of FIFOs
+    async def coro(ctx):
+        outpath = tmp_path / f'{ctx.tjob.name}_outfile'
+        errpath = tmp_path / f'{ctx.tjob.name}_errfile'
+        with outpath.open('w') as outf, errpath.open('w') as errf:
+            with ctx.follow_file(outpath), ctx.follow_file(errpath, True):
+                return await ctx.tjob.do_thread(ctx, outf, errf)
+
+    todo = [TJob(name, coro=coro) for name in ['foo', 'bar']]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo],
+        [job.xerr() for job in todo],
+        [job.xlog() for job in todo],
+    )
+
+
 # decorated output from subprocesses
 
 
 async def test_decorated_output_from_subprocess_worker(run, verify_output):
     todo = [TJob(name, mode='mock_argv') for name in ['foo', 'bar']]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo],
+        [job.xerr(include_log=True) for job in todo],
+    )
+
+
+async def test_decorated_output_from_subprocess_via_follow_file(
+    tmp_path, run, verify_output
+):
+    async def coro(ctx):
+        outpath = tmp_path / f'{ctx.tjob.name}_outfile'
+        errpath = tmp_path / f'{ctx.tjob.name}_errfile'
+        argv = ctx.tjob.mock_argv()
+        with outpath.open('w') as outf, errpath.open('w') as errf:
+            with ctx.follow_file(outpath), ctx.follow_file(errpath, True):
+                with ctx.tjob.subprocess_xevents(argv):
+                    return await ctx.run_in_subprocess(
+                        argv, stdout=outf, stderr=errf, check=True
+                    )
+
+    todo = [TJob(name, coro=coro) for name in ['foo', 'bar']]
     await run(todo)
     assert verify_output(
         [job.xout() for job in todo],
@@ -443,6 +529,33 @@ async def test_subproc_decorate_stderr_capture_stdout(run, verify_output):
                 output = await proc.stdout.read()
                 await proc.wait()
                 return output
+
+    todo = [TJob(name, coro=coro) for name in ['foo', 'bar']]
+    done = await run(todo)
+    assert verify_tasks(  # undecorated output was captured and returned
+        done, {job.name: job.out.encode('ascii') for job in todo}
+    )
+    assert verify_output(
+        [], [job.xerr(include_log=True) for job in todo],  # output captured
+    )
+
+
+async def test_subproc_decorate_stderr_via_follow_file_capture_stdout(
+    tmp_path, run, verify_output
+):
+    async def coro(ctx):
+        outpath = tmp_path / f'{ctx.tjob.name}_outfile'
+        errpath = tmp_path / f'{ctx.tjob.name}_errfile'
+        argv = ctx.tjob.mock_argv()
+        with outpath.open('w'), errpath.open('w') as errf:
+            with ctx.follow_file(outpath), ctx.follow_file(errpath, True):
+                with ctx.tjob.subprocess_xevents(argv, result=0):
+                    async with ctx.subprocess(
+                        argv, stdout=PIPE, stderr=errf
+                    ) as proc:
+                        output = await proc.stdout.read()
+                        await proc.wait()
+                        return output
 
     todo = [TJob(name, coro=coro) for name in ['foo', 'bar']]
     done = await run(todo)
@@ -514,6 +627,24 @@ async def test_output_outside_decoration_from_subprocess(run, verify_output):
     assert verify_output(
         [job.xout() for job in todo],
         [job.xerr(include_log=True) for job in todo],
+    )
+
+
+async def test_follow_file_outside_decoration_raises_RuntimeError(
+    tmp_path, run, verify_output
+):
+    path = tmp_path / 'file'
+    path.write_text('\n'.join(['first line', 'second line', 'third line']))
+
+    async def coro(ctx):
+        with ctx.follow_file(path):
+            pass
+
+    todo = TUndecoratedJob('foo', coro=coro)
+    done = await run([todo])
+    assert verify_tasks(
+        done,
+        {'foo': RuntimeError('Cannot follow file outside decoration context')},
     )
 
 
