@@ -161,6 +161,85 @@ async def test_write_to_file(tmp_path):
     assert path.read_text() == 'first line\nsecond line\n'
 
 
+async def test_follow_file_reads_from_beginning(tmp_path, verify_output):
+    path = tmp_path / 'file'
+    with path.open('w') as f, StreamMux() as mux:
+        print('first line', file=f, flush=True)
+        with mux.follow_file(path, '<{}>'):
+            print('second line', file=f, flush=True)
+        print('third line', file=f, flush=True)  # not watched
+    assert verify_output([['<first line>', '<second line>']])
+
+
+async def test_follow_file_first_read_is_immediate(tmp_path, verify_output):
+    path = tmp_path / 'file'
+    with path.open('w') as f, StreamMux() as mux:
+        print('first line', file=f, flush=True)
+        with mux.follow_file(path, '<{}>'):
+            await asyncio.sleep(0.001)
+            assert verify_output([['<first line>']])
+    assert verify_output([])
+
+
+async def test_follow_file_second_read_after_period(tmp_path, verify_output):
+    path = tmp_path / 'file'
+    with path.open('w') as f, StreamMux() as mux:
+        print('first line', file=f, flush=True)
+        with mux.follow_file(path, '<{}>', period=0.01):
+            await asyncio.sleep(0.001)
+            assert verify_output([['<first line>']])
+            print('second line', file=f, flush=True)
+            await asyncio.sleep(0.001)
+            assert verify_output([])
+            await asyncio.sleep(0.01)
+            assert verify_output([['<second line>']])
+    assert verify_output([])
+
+
+async def test_follow_file_read_after_writer_close(tmp_path, verify_output):
+    path = tmp_path / 'file'
+    f = path.open('w')
+    print('first line', file=f, flush=True)
+    with StreamMux() as mux, mux.follow_file(path, '<{}>', period=0.01):
+        await asyncio.sleep(0.001)
+        assert verify_output([['<first line>']])
+        print('second line', file=f, flush=True)
+        f.close()
+        await asyncio.sleep(0.01)
+        assert verify_output([['<second line>']])
+    assert verify_output([])
+
+
+async def test_follow_file_ignores_short_rewrites(tmp_path, verify_output):
+    path = tmp_path / 'file'
+    f = path.open('w')
+    print('this is the first line', file=f, flush=True)
+    with StreamMux() as mux, mux.follow_file(path, '<{}>', period=0.01):
+        await asyncio.sleep(0.001)
+        assert verify_output([['<this is the first line>']])
+        print('second line', file=f, flush=True)
+        f.close()
+        f = path.open('w')
+        print('short rewrite', file=f, flush=True)  # not seen by reader
+        f.close()
+    assert verify_output([])  # misses both 'second line' and 'short rewrite'
+
+
+async def test_follow_file_reads_appends(tmp_path, verify_output):
+    path = tmp_path / 'file'
+    f = path.open('w')
+    print('first line', file=f, flush=True)
+    with StreamMux() as mux, mux.follow_file(path, '<{}>', period=0.01):
+        await asyncio.sleep(0.001)
+        assert verify_output([['<first line>']])
+        print('second line', file=f, flush=True)
+        f.close()
+        f = path.open('a')
+        print('third line', file=f, flush=True)
+        f.close()
+    assert verify_output([['<second line>', '<third line>']])
+
+
 async def test_internal_errors_are_propagated(tmp_path):
     path = tmp_path / 'file'
     f = path.open('w')

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import io
 import logging
 import os
@@ -108,6 +109,7 @@ class StreamMux:
         self.tempdir = TemporaryDirectory(dir=tmp_base, prefix='StreamMux_')
         self.fifonum = 0
         self.watches = {}  # map path -> (f, decorator, buffer)
+        self.polls = {}  # map path -> (timer, path, f, decorator, buffer)
 
     def new_stream(self, decorator=None, mode='w'):
         return DecoratedStream(self, decorator, mode)
@@ -180,6 +182,63 @@ class StreamMux:
         f.close()
         assert not buffer
 
+    @contextlib.contextmanager
+    def follow_file(self, path, decorator=None, *, period=0.1):
+        """Context manager to poll the given path while inside this context."""
+        self.poll(path, decorator, period=period)
+        try:
+            yield
+        finally:
+            self.unpoll(path)
+
+    def poll(self, path, decorator=None, *, period=0.1):
+        """Add the given 'path' to be polled periodically by StreamMux.
+
+        Lines read from 'path' will be passed through 'decorator' before being
+        written to this StreamMux' shared output.
+        """
+        assert period > 0
+        decorator = self._prepare_decorator(decorator)
+        logger.debug(f'Polling {path}')
+        assert path not in self.polls
+        f = path.open(mode='rb')
+        buffer = bytearray()
+        timer = asyncio.get_running_loop().call_later(
+            0, self._do_poll, path, f, decorator, buffer, period
+        )
+        self.polls[path] = (timer, path, f, decorator, buffer)
+
+    def _do_poll(self, path, f, decorator, buffer, period):
+        last = period < 0
+        pos = f.tell()
+        stat = os.stat(f.fileno())
+        end = stat.st_size
+
+        if pos < end:  # There is something to be read
+            # Try to read cheaply, unless this is the last call
+            chunk = f.read() if last else f.read1(stat.st_blksize)
+            buffer.extend(chunk)
+            pos += len(chunk)
+            self._process_lines(decorator, buffer, last)
+
+        if not last:  # Schedule next poll
+            # Read again ASAP if we already know there is more to read
+            delay = period if pos >= end else 0
+            timer = asyncio.get_running_loop().call_later(
+                delay, self._do_poll, path, f, decorator, buffer, period
+            )
+            self.polls[path] = (timer, path, f, decorator, buffer)
+
+    def unpoll(self, path):
+        """Stop polling the given 'path'."""
+        logger.debug(f'Unpolling {path}')
+        assert path in self.polls
+        timer, path, f, decorator, buffer = self.polls.pop(path)
+        timer.cancel()
+        self._do_poll(path, f, decorator, buffer, -1)  # last call
+        f.close()
+        assert not buffer
+
     def shutdown(self):
         """Shutdown this StreamMux instance.
 
@@ -189,6 +248,9 @@ class StreamMux:
         for path in sorted(self.watches.keys()):
             logger.warning(f'{path} was not unwatched!')
             self.unwatch(path)
+        for path in sorted(self.polls.keys()):
+            logger.warning(f'{path} was not unpolled!')
+            self.unpoll(path)
         if not self.out.closed:
             self.out.flush()
         self.tempdir.cleanup()
