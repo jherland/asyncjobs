@@ -2,13 +2,13 @@ import asyncio
 import logging
 import sys
 
-from asyncjobs import stream_mux, logmuxed_work
+from asyncjobs import stream_mux, decorated_work
 
 from conftest import adjusted_logger_level, verify_tasks
 
 
 async def job_coro(ctx):
-    with ctx.redirect(
+    with ctx.decoration(
         decorate_out=f'{ctx.name}/out: ', decorate_err=f'{ctx.name}/ERR: ',
     ):
         with ctx.stdout as outf, ctx.stderr as errf:
@@ -21,7 +21,7 @@ async def noop():
     pass
 
 
-# These tests verify that the StreamMuxes used by logmuxed_work are hooked up
+# These tests verify that the StreamMuxes used by decorated_work are hooked up
 # to the same event loop as the scheduler itself. Regressions here are not
 # reproducible when everything runs inside the same asyncio test framework,
 # hence these tests drive asyncio.run directly.
@@ -38,7 +38,7 @@ def test_instantiating_logmux_after_asyncio_run_is_ok():
 
 
 def test_one_simple_job_through_default_muxes(verify_output, num_workers):
-    scheduler = logmuxed_work.Scheduler(workers=num_workers)
+    scheduler = decorated_work.Scheduler(workers=num_workers)
     scheduler.add_job('foo', job_coro)
     # Prevent stream_mux DEBUG messages on stderr
     with adjusted_logger_level(stream_mux.logger, logging.INFO):
@@ -48,7 +48,7 @@ def test_one_simple_job_through_default_muxes(verify_output, num_workers):
 
 
 def test_one_simple_job_through_custom_muxes(verify_output, num_workers):
-    scheduler = logmuxed_work.Scheduler(
+    scheduler = decorated_work.Scheduler(
         workers=num_workers,
         outmux=stream_mux.StreamMux(sys.stderr),
         errmux=stream_mux.StreamMux(sys.stdout),

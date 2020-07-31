@@ -8,34 +8,36 @@ from . import external_work, logcontext, stream_mux
 logger = logging.getLogger(__name__)
 
 
-def redirected_job(decorate_out=None, decorate_err=None, decorate_log=None):
-    """Setup stdout/stderr redirection for the given coroutine.
+def decorated_job(decorate_out=None, decorate_err=None, decorate_log=None):
+    """Setup stdout/stderr/log decoration for the given coroutine.
 
     This is the same as wrapping the entire coroutine in:
 
-        with ctx.redirect(...):
+        with ctx.decoration(...):
             ...
 
     Use as a decorator:
 
-        @redirected_job()
+        @decorated_job()
         async def my_job(ctx):
             logger.info('hello')
             await asyncio.sleep(1)
             logger.info(world')
 
-        @redirected_job(decorate_out='DECORATED: ')
+        @decorated_job(decorate_out='DECORATED: ')
         async def my_other_job(ctx):
             with ctx.stdout as f:
                 print('hello', file=f)
                 await asyncio.sleep(1)
                 print(again', file=f)
+
+    See Context.decoration() for more details
     """
 
     def wrap(coro):
         @functools.wraps(coro)
         async def wrapped_coro(ctx):
-            with ctx.redirect(
+            with ctx.decoration(
                 decorate_out=decorate_out,
                 decorate_err=decorate_err,
                 decorate_log=decorate_log,
@@ -72,9 +74,28 @@ class Context(external_work.Context):
         self.stderr = None
 
     @contextlib.contextmanager
-    def redirect(
+    def decoration(
         self, *, decorate_out=None, decorate_err=None, decorate_log=None,
     ):
+        """Setup context with decorated stdout/stderr streams + decorated log.
+
+        Inside this context, self.stdout and self.stderr are DecoratedStream
+        objects (decorated by 'decorate_out' and 'decorate_err', respectively)
+        that may be opened/entered in order to write decorated output.
+
+        Likewise, 'decorate_log' is set as the log decorator for the current
+        context (the current job).
+
+        If 'decorate_log' is not given, but 'decorate_err' is given,
+        'decorate_log' will default to 'decorate_err'. Otherwise, all
+        decorators default to None, i.e. no decoration.
+
+        Note that the output streams (self.stdout, self.stderr) are used as the
+        default stdout/stderr stream for subprocesses started within this
+        context (see .subprocess() below). Similarly, 'decorate_log' is
+        automatically applied to the log context of threads started within
+        this context (see .call_in_thread() below).
+        """
         if decorate_log is True:
             decorate_log = decorate_err
         assert self.stdout is None and self.stderr is None
@@ -92,7 +113,7 @@ class Context(external_work.Context):
                 self.stderr = None
 
     async def call_in_thread(self, func, *args, **kwargs):
-        # Apply current log context to thread
+        """Apply the current log context (if any) to threaded function call."""
         decorator = logcontext.Decorator.get(logcontext.current_context())
         assert decorator is None or callable(decorator)
 

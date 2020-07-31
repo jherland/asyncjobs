@@ -9,7 +9,7 @@ from subprocess import PIPE
 import sys
 import time
 
-from asyncjobs import logcontext, logmuxed_work, signal_handling, stream_mux
+from asyncjobs import logcontext, decorated_work, signal_handling, stream_mux
 
 from conftest import (
     abort_in,
@@ -103,7 +103,7 @@ class TJob(TExternalWorkJob):
         self.extras = extras
 
     async def __call__(self, ctx):
-        with ctx.redirect(
+        with ctx.decoration(
             decorate_out=f'{self.name}/out: ' if self.decorate else None,
             decorate_err=f'{self.name}/ERR: ' if self.decorate else None,
             decorate_log=f'{self.name}/log: ' if self.decorate else None,
@@ -188,7 +188,7 @@ class TJob(TExternalWorkJob):
 @pytest.fixture
 def Scheduler(scheduler_with_workers):
     return scheduler_with_workers(
-        signal_handling.Scheduler, logmuxed_work.Scheduler
+        signal_handling.Scheduler, decorated_work.Scheduler
     )
 
 
@@ -448,11 +448,11 @@ async def test_subproc_capture_stdout_from_terminated_proc(run, verify_output):
     assert verify_output([], [])  # subproc terminated before print to stderr
 
 
-# redirected_job() decorator
+# decorated_job() decorator
 
 
-async def test_redirected_job_with_no_decoration(run, verify_output):
-    @logmuxed_work.redirected_job()
+async def test_decorated_job_with_no_decoration(run, verify_output):
+    @decorated_work.decorated_job()
     async def job(ctx):
         with ctx.stdout as outf, ctx.stderr as errf:
             print('Printing to stdout', file=outf)
@@ -466,8 +466,8 @@ async def test_redirected_job_with_no_decoration(run, verify_output):
     )
 
 
-async def test_redirected_and_decorated_job(run, verify_output):
-    @logmuxed_work.redirected_job('foo/out: ', 'foo/ERR: ', 'foo/log: ')
+async def test_decorated_job_with_decoration(run, verify_output):
+    @decorated_work.decorated_job('foo/out: ', 'foo/ERR: ', 'foo/log: ')
     async def job(ctx):
         with ctx.stdout as outf, ctx.stderr as errf:
             print('Printing to stdout', file=outf)
@@ -483,8 +483,8 @@ async def test_redirected_and_decorated_job(run, verify_output):
     )
 
 
-async def test_redirected_job_only_decorate_stderr_and_log(run, verify_output):
-    @logmuxed_work.redirected_job(decorate_err='foo/ERR: ', decorate_log=True)
+async def test_decorated_job_only_decorate_stderr_and_log(run, verify_output):
+    @decorated_work.decorated_job(decorate_err='foo/ERR: ', decorate_log=True)
     async def job(ctx):
         with ctx.stdout as outf, ctx.stderr as errf:
             print('Printing to stdout', file=outf)
@@ -500,8 +500,8 @@ async def test_redirected_job_only_decorate_stderr_and_log(run, verify_output):
     )
 
 
-async def test_redirected_job_with_decorated_subprocess(run, verify_output):
-    @logmuxed_work.redirected_job('foo/out: ', 'foo/ERR: ', 'foo/log: ')
+async def test_decorated_job_with_decorated_subprocess(run, verify_output):
+    @decorated_work.decorated_job('foo/out: ', 'foo/ERR: ', 'foo/log: ')
     async def job(ctx):
         argv = mock_argv(
             'Printing to stdout', 'err:', 'Printing to stderr', 'log:Logging!'
@@ -518,8 +518,8 @@ async def test_redirected_job_with_decorated_subprocess(run, verify_output):
     )
 
 
-async def test_redirected_job_with_subproc_output_capture(run, verify_output):
-    @logmuxed_work.redirected_job('foo/out: ', 'foo/ERR: ', 'foo/log: ')
+async def test_decorated_job_with_subproc_output_capture(run, verify_output):
+    @decorated_work.decorated_job('foo/out: ', 'foo/ERR: ', 'foo/log: ')
     async def job(ctx):
         argv = mock_argv(
             'Printing to stdout', 'err:', 'Printing to stderr', 'log:Logging!'
@@ -539,7 +539,7 @@ async def test_redirected_job_with_subproc_output_capture(run, verify_output):
     )
 
 
-# stress-testing the logmuxed_work framework
+# stress-testing the decorated_work framework
 
 
 async def test_decorated_output_from_many_jobs(num_jobs, run, verify_output):
