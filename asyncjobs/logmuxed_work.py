@@ -3,7 +3,7 @@ import functools
 import logging
 import sys
 
-from . import external_work, logcontext, logmux
+from . import external_work, logcontext, stream_mux
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +48,20 @@ def redirected_job(decorate_out=None, decorate_err=None, decorate_log=None):
 
 
 class Context(external_work.Context):
-    """API for jobs with stdout/stderr redirected via a LogMux-aware Scheduler.
+    """API for jobs that want to decorate their logs/stdout/stderr.
 
-    This enables jobs to have their output multiplexed to a single (pair of)
-    output stream(s) controlled by the below Scheduler.
+    This enables jobs to create stdout/stderr streams that are automatically
+    decorated and multiplexed onto the stdout/stderr streams controlled by the
+    below Scheduler.
 
     Redirection of the actual stdout/stderr file descriptors is automatically
-    done for subprocesses, and for loggers (unless a custom log_handler is
-    passed, or if log handling is disabled by log_handler=False).
-    Other output (from thread workers or directly from .__call__()) must be
-    redirected manually into the file descriptor retrieved from
+    done for subprocesses. Log statements (made in the job coroutine or its
+    callees, or from threads run by the job) are not redirected, but are
+    decorated nonetheless (as long as logcontext.Formatter is used as the log
+    formatter).
+
+    Other output (from the job coroutine, or from thread workers) can be
+    decorated by writing into the file descriptor retrieved from
     self.stdout.open() or self.stderr.open() (or by using self.stdout or
     self.stderr as context managers).
     """
@@ -120,11 +124,12 @@ class Context(external_work.Context):
 
 
 class Scheduler(external_work.Scheduler):
-    """Run jobs with their output multiplexed through LogMux.
+    """Run jobs with automatic decoration of their stdout/stderr + logs.
 
-    Extend Scheduler with two LogMux instances - one for stdout and one for
-    stderr. Can be used by job coroutines redirect their stdout/stderr through
-    to a single pair of output streams controlled by the caller.
+    Extend Scheduler with two StreamMux instances - one for stdout and one for
+    stderr - to be used by job coroutines for redirecting (and decorating)
+    their stdout/stderr through to a single pair of output streams controlled
+    by this scheduler instance.
     """
 
     def __init__(
@@ -138,10 +143,10 @@ class Scheduler(external_work.Scheduler):
 
     async def _run_tasks(self, *args, **kwargs):
         if self.outmux is None:
-            self.outmux = logmux.LogMux(sys.stdout)
+            self.outmux = stream_mux.StreamMux(sys.stdout)
         if self.errmux is None:
-            self.errmux = logmux.LogMux(sys.stderr)
+            self.errmux = stream_mux.StreamMux(sys.stderr)
 
-        logger.debug('Starting LogMux instances…')
+        logger.debug('Starting StreamMux instances…')
         with self.outmux, self.errmux:
             await super()._run_tasks(*args, **kwargs)

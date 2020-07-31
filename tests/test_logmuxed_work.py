@@ -9,7 +9,7 @@ from subprocess import PIPE
 import sys
 import time
 
-from asyncjobs import logcontext, logmux, logmuxed_work, signal_handling
+from asyncjobs import logcontext, logmuxed_work, signal_handling, stream_mux
 
 from conftest import (
     abort_in,
@@ -303,8 +303,8 @@ async def test_decorated_linewise_output_from_two_jobs(run, verify_output):
 
 async def test_decorated_output_via_custom_muxes(run, verify_output):
     todo = [TJob(name) for name in ['foo', 'bar']]
-    to_stdout = logmux.LogMux(sys.stdout)
-    to_stderr = logmux.LogMux(sys.stderr)
+    to_stdout = stream_mux.StreamMux(sys.stdout)
+    to_stderr = stream_mux.StreamMux(sys.stderr)
     await run(todo, outmux=to_stderr, errmux=to_stdout)  # flip stderr/stdout
     assert verify_output(
         [job.xerr() for job in todo],  # flipped
@@ -539,7 +539,7 @@ async def test_redirected_job_with_subproc_output_capture(run, verify_output):
     )
 
 
-# stress-testing the logmux framework
+# stress-testing the logmuxed_work framework
 
 
 async def test_decorated_output_from_many_jobs(num_jobs, run, verify_output):

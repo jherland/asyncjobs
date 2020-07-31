@@ -1,19 +1,19 @@
 import asyncio
 import pytest
 
-from asyncjobs.logmux import LogMux
+from asyncjobs.stream_mux import StreamMux
 
 pytestmark = pytest.mark.asyncio
 
 
 async def test_no_output(verify_output):
-    with LogMux():
+    with StreamMux():
         pass
     assert verify_output([[]])
 
 
 async def test_one_stream_undecorated(verify_output):
-    with LogMux() as logmux, logmux.new_stream() as f:
+    with StreamMux() as mux, mux.new_stream() as f:
         print('This is the first line', file=f)
         print('This is the second line', file=f)
     assert verify_output(
@@ -22,9 +22,9 @@ async def test_one_stream_undecorated(verify_output):
 
 
 async def test_two_streams_undecorated(verify_output):
-    with LogMux() as logmux, logmux.new_stream() as f:
+    with StreamMux() as mux, mux.new_stream() as f:
         print('This is stream 1 line 1', file=f)
-        with logmux.new_stream() as g:
+        with mux.new_stream() as g:
             print('This is stream 2 line 1', file=g)
             print('This is stream 2 line 2', file=g)
         print('This is stream 1 line 2', file=f)
@@ -37,9 +37,9 @@ async def test_two_streams_undecorated(verify_output):
 
 
 async def test_one_stream_decorated(verify_output):
-    with LogMux() as logmux:
-        decorator = LogMux.simple_decorator('[pre]{}[post]')  # long-winded
-        with logmux.new_stream(decorator) as f:
+    with StreamMux() as mux:
+        decorator = StreamMux.simple_decorator('[pre]{}[post]')  # long-winded
+        with mux.new_stream(decorator) as f:
             print('This is the first line', file=f)
             print('This is the second line', file=f)
     assert verify_output(
@@ -53,10 +53,10 @@ async def test_one_stream_decorated(verify_output):
 
 
 async def test_two_streams_decorated(verify_output):
-    with LogMux() as logmux:
-        with logmux.new_stream(b'1>>{}<<1') as f:  # shorter version
+    with StreamMux() as mux:
+        with mux.new_stream(b'1>>{}<<1') as f:  # shorter version
             print('This is stream 1 line 1', file=f)
-            with logmux.new_stream('2>>{}<<2') as g:
+            with mux.new_stream('2>>{}<<2') as g:
                 print('This is stream 2 line 1', file=g)
                 print('This is stream 2 line 2', file=g)
             print('This is stream 1 line 2', file=f)
@@ -70,7 +70,7 @@ async def test_two_streams_decorated(verify_output):
 
 async def test_one_charwise_stream_decorated(verify_output):
     s = 'foo\nbar\nbaz'
-    with LogMux() as logmux, logmux.new_stream('<{}>') as f:
+    with StreamMux() as mux, mux.new_stream('<{}>') as f:
         for c in s:
             f.write(c)
     assert verify_output([['<foo>', '<bar>', '<baz>']])
@@ -78,7 +78,7 @@ async def test_one_charwise_stream_decorated(verify_output):
 
 async def test_one_charwise_interrupted_stream_decorated(verify_output):
     s = 'foo\nbar\nbaz'
-    with LogMux() as logmux, logmux.new_stream('<{}>') as f:
+    with StreamMux() as mux, mux.new_stream('<{}>') as f:
         for c in s:
             f.write(c)
             f.flush()
@@ -89,10 +89,11 @@ async def test_one_charwise_interrupted_stream_decorated(verify_output):
 async def test_two_charwise_streams_decorated(verify_output):
     s = 'foo\nbar\nbaz'
     t = '123\n456\n789'
-    with LogMux() as x, x.new_stream(b'<{}>') as f, x.new_stream('[{}]') as g:
-        for c, d in zip(s, t):
-            f.write(c)
-            g.write(d)
+    with StreamMux() as mux:
+        with mux.new_stream(b'<{}>') as f, mux.new_stream('[{}]') as g:
+            for c, d in zip(s, t):
+                f.write(c)
+                g.write(d)
     assert verify_output(
         [['<foo>', '<bar>', '<baz>'], ['[123]', '[456]', '[789]']]
     )
@@ -101,13 +102,14 @@ async def test_two_charwise_streams_decorated(verify_output):
 async def test_two_charwise_interrupted_streams_decorated(verify_output):
     s = 'foo\nbar\nbaz'
     t = '123\n456\n789'
-    with LogMux() as x, x.new_stream(b'<{}>') as f, x.new_stream('[{}]') as g:
-        for c, d in zip(s, t):
-            f.write(c)
-            g.write(d)
-            f.flush()
-            g.flush()
-            await asyncio.sleep(0.001)
+    with StreamMux() as mux:
+        with mux.new_stream(b'<{}>') as f, mux.new_stream('[{}]') as g:
+            for c, d in zip(s, t):
+                f.write(c)
+                g.write(d)
+                f.flush()
+                g.flush()
+                await asyncio.sleep(0.001)
     assert verify_output(
         [['<foo>', '<bar>', '<baz>'], ['[123]', '[456]', '[789]']]
     )
@@ -124,7 +126,7 @@ async def test_one_bytewise_stream_with_garbage(capfdbinary):
     bytestring = b'\n'.join(lines)
     prefix, suffix = '❰'.encode('utf-8'), '❱\n'.encode('utf-8')
     expect_bytestring = b''.join(prefix + line + suffix for line in lines)
-    with LogMux() as logmux, logmux.new_stream('❰{}❱') as f:
+    with StreamMux() as mux, mux.new_stream('❰{}❱') as f:
         f.buffer.write(bytestring)
     actual = capfdbinary.readouterr()
     assert actual.out == expect_bytestring
@@ -142,7 +144,7 @@ async def test_one_bytewise_stream_in_binary_mode_with_garbage(capfdbinary):
     bytestring = b'\n'.join(lines)
     prefix = b'>>> '  # test passing bytes w/o placeholder to simple_decorator
     expect_bytestring = b''.join(prefix + line + b'\n' for line in lines)
-    with LogMux() as logmux, logmux.new_stream(prefix, mode='wb') as f:
+    with StreamMux() as mux, mux.new_stream(prefix, mode='wb') as f:
         f.write(bytestring)
     actual = capfdbinary.readouterr()
     assert actual.out == expect_bytestring
@@ -151,7 +153,7 @@ async def test_one_bytewise_stream_in_binary_mode_with_garbage(capfdbinary):
 
 async def test_write_to_file(tmp_path):
     path = tmp_path / 'file'
-    with path.open('w') as f, LogMux(f) as logmux, logmux.new_stream() as g:
+    with path.open('w') as f, StreamMux(f) as mux, mux.new_stream() as g:
         g.write('first line\n')
         await asyncio.sleep(0.001)
         g.write('second line\n')
@@ -163,7 +165,7 @@ async def test_internal_errors_are_propagated(tmp_path):
     path = tmp_path / 'file'
     f = path.open('w')
     with pytest.raises(ValueError):
-        with LogMux(f) as logmux, logmux.new_stream() as g:
+        with StreamMux(f) as mux, mux.new_stream() as g:
             g.write('first line\n')
             g.flush()
             await asyncio.sleep(0.001)

@@ -26,7 +26,7 @@ def simple_decorator(pattern=None):
 
       lambda bs: b'foo ' + bs + b' bar' + b'\n'
 
-    Since LogMux works on bytes only, the decorator function returned from
+    Since StreamMux works on bytes only, the decorator function returned from
     here will also work on bytes only. However, for your convenience (and as
     shown above), any strings given to this factory will be automatically
     converted to bytes using string.encode('utf-8', errors='surrogateescape').
@@ -51,10 +51,10 @@ def simple_decorator(pattern=None):
 
 
 class DecoratedStream:
-    """Manage the opening/closing of a LogMux FIFO."""
+    """Manage the opening/closing of a StreamMux FIFO."""
 
-    def __init__(self, logmux, decorator=None, mode='w'):
-        self.logmux = logmux
+    def __init__(self, mux, decorator=None, mode='w'):
+        self.mux = mux
         self.decorator = decorator
         self.mode = mode
         self.path = None
@@ -64,7 +64,7 @@ class DecoratedStream:
     def open(self):
         if self.path is None:  # FIFO not yet open
             assert self.fifo is None
-            self.path = self.logmux.watched_fifo(self.decorator)
+            self.path = self.mux.watched_fifo(self.decorator)
             self.fifo = self.path.open(self.mode)
         self.used_by += 1
         return self.fifo
@@ -79,7 +79,7 @@ class DecoratedStream:
             if self.fifo is not None:
                 self.fifo.close()
                 self.fifo = None
-            self.logmux.unwatch(self.path)
+            self.mux.unwatch(self.path)
             self.path = None
 
     def __enter__(self):
@@ -89,11 +89,10 @@ class DecoratedStream:
         self.close()
 
 
-class LogMux:
-    """Async task to multiplex many write streams into a single stream."""
+class StreamMux:
+    """Multiplex several output streams (w/decoration) into a single stream."""
 
     default_decorator = staticmethod(default_decorator)
-
     simple_decorator = staticmethod(simple_decorator)
 
     def __init__(self, out=None, tmp_base=None):
@@ -106,7 +105,7 @@ class LogMux:
                 raise ValueError(f'Cannot find binary stream in {out}')
         else:
             self.out = out
-        self.tempdir = TemporaryDirectory(dir=tmp_base, prefix='LogMux_')
+        self.tempdir = TemporaryDirectory(dir=tmp_base, prefix='StreamMux_')
         self.fifonum = 0
         self.watches = {}  # map path -> (f, decorator, buffer)
 
@@ -114,11 +113,11 @@ class LogMux:
         return DecoratedStream(self, decorator, mode)
 
     def watched_fifo(self, decorator=None):
-        """Create a FIFO (aka. named pipe) that is watched by LogMux.
+        """Create a FIFO (aka. named pipe) that is watched by StreamMux.
 
         Creates a FIFO in self.tempdir, and returns its path.
-        The FIFO is watched by this LogMux, so anything written into it will
-        appear on this LogMux's output (after passing through 'decorator').
+        The FIFO is watched by this StreamMux, so anything written into it will
+        appear on this StreamMux' output (after passing through 'decorator').
 
         The FIFO (and the rest of self.tempdir) will be automatically removed
         on shutdown.
@@ -131,10 +130,10 @@ class LogMux:
         return fifopath
 
     def _watch(self, path, decorator=None):
-        """Add the given 'path' to be watched by LogMux.
+        """Add the given 'path' to be watched by StreamMux.
 
         Lines read from 'path' will be passed through 'decorator' before being
-        written to this logmux's shared output.
+        written to this StreamMux' shared output.
         """
         if decorator is None:  # => identity decorator
             decorator = self.default_decorator
@@ -175,7 +174,10 @@ class LogMux:
         assert not buffer
 
     def shutdown(self):
-        """Shutdown LogMux. Stop watching all files and cleanup temporaries."""
+        """Shutdown this StreamMux instance.
+
+        Stop watching all files and cleanup temporary FIFOs.
+        """
         logger.debug('Shutting down')
         for path in sorted(self.watches.keys()):
             logger.warning(f'{path} was not unwatched!')
