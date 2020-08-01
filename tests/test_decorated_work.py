@@ -72,7 +72,7 @@ def shuffled_prints(out_f, err_f, out_strings, err_strings):
     yield from random_interleave(out_prints, err_prints)
 
 
-class TJob(TExternalWorkJob):
+class TUndecoratedJob(TExternalWorkJob):
     def __init__(
         self,
         *args,
@@ -80,7 +80,6 @@ class TJob(TExternalWorkJob):
         out=None,
         err=None,
         log=None,
-        decorate=True,
         extras=None,
         **kwargs,
     ):
@@ -99,36 +98,24 @@ class TJob(TExternalWorkJob):
         self.out = f"This is {self.name}'s stdout\n" if out is None else out
         self.err = f"This is {self.name}'s stderr\n" if err is None else err
         self.log = f"This is {self.name}'s log" if log is None else log
-        self.decorate = decorate
         self.extras = extras
-
-    async def __call__(self, ctx):
-        with ctx.decoration(
-            decorate_out=f'{self.name}/out: ' if self.decorate else None,
-            decorate_err=f'{self.name}/ERR: ' if self.decorate else None,
-            decorate_log=f'{self.name}/log: ' if self.decorate else None,
-        ):
-            return await super().__call__(ctx)
 
     def xout(self):
         """Return expected stdout data from this job."""
-        prefix = f'{self.name}/out: ' if self.decorate else ''
         lines = self.out if isinstance(self.out, list) else [self.out]
-        return [prefix + line.rstrip() for line in lines]
+        return [line.rstrip() for line in lines]
 
-    def xerr(self, include_log=False):
+    def xerr(self, *, include_log=False):
         """Return expected stderr data from this job."""
-        prefix = f'{self.name}/ERR: ' if self.decorate else ''
         lines = self.err if isinstance(self.err, list) else [self.err]
         if include_log and self.log:
             lines += [self.log]
-        return [prefix + line.rstrip() for line in lines]
+        return [line.rstrip() for line in lines]
 
     def xlog(self):
         """Return expected log messages from this job."""
-        prefix = f'{self.name}/log: ' if self.decorate else ''
         lines = self.log if isinstance(self.log, list) else [self.log]
-        return [prefix + line.rstrip() for line in lines]
+        return [line.rstrip() for line in lines]
 
     def shuffled_out_err(self, out_f, err_f):
         if isinstance(self.out, list):  # lines from list of strings
@@ -157,15 +144,19 @@ class TJob(TExternalWorkJob):
                 args.append(arg)
         return mock_argv(*args)
 
-    async def do_async(self, ctx):
-        with ctx.stdout as outf, ctx.stderr as errf:
-            for print_one in self.shuffled_out_err(outf, errf):
-                print_one()
-                await asyncio.sleep(0)
-            if self.log:
-                testlogger.error(self.log)
+    async def do_async(self, ctx, outf=None, errf=None):
+        outf = sys.stdout if outf is None else outf
+        errf = sys.stderr if errf is None else errf
+        for print_one in self.shuffled_out_err(outf, errf):
+            print_one()
+            await asyncio.sleep(0)
+        if self.log:
+            testlogger.error(self.log)
 
-    async def do_thread(self, ctx):
+    async def do_thread(self, ctx, outf=None, errf=None, ticket=None):
+        outf = sys.stdout if outf is None else outf
+        errf = sys.stderr if errf is None else errf
+
         def in_thread(outf, errf, *_):
             for print_one in self.shuffled_out_err(outf, errf):
                 print_one()
@@ -173,16 +164,47 @@ class TJob(TExternalWorkJob):
             if self.log:
                 testlogger.error(self.log)
 
-        async with ctx.reserve_worker() as ticket:
-            with ctx.stdout as outf, ctx.stderr as errf:
-                return await self.run_thread(
-                    functools.partial(in_thread, outf, errf),
-                    ctx,
-                    ticket=ticket,
-                )
+        return await self.run_thread(
+            functools.partial(in_thread, outf, errf), ctx, ticket=ticket,
+        )
 
     async def do_mock_argv(self, ctx):
         return await self.run_subprocess(self.mock_argv(self.extras), ctx)
+
+
+class TJob(TUndecoratedJob):
+    def __init__(self, *args, decorate=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.decorate = decorate
+
+    async def __call__(self, ctx):
+        with ctx.decoration(
+            decorate_out=f'{self.name}/out: ' if self.decorate else None,
+            decorate_err=f'{self.name}/ERR: ' if self.decorate else None,
+            decorate_log=f'{self.name}/log: ' if self.decorate else None,
+        ):
+            return await super().__call__(ctx)
+
+    def xout(self):
+        prefix = f'{self.name}/out: ' if self.decorate else ''
+        return [prefix + line for line in super().xout()]
+
+    def xerr(self, **kwargs):
+        prefix = f'{self.name}/ERR: ' if self.decorate else ''
+        return [prefix + line for line in super().xerr(**kwargs)]
+
+    def xlog(self):
+        prefix = f'{self.name}/log: ' if self.decorate else ''
+        return [prefix + line for line in super().xlog()]
+
+    async def do_async(self, ctx):
+        with ctx.stdout as outf, ctx.stderr as errf:
+            return await super().do_async(ctx, outf, errf)
+
+    async def do_thread(self, ctx):
+        async with ctx.reserve_worker() as ticket:
+            with ctx.stdout as outf, ctx.stderr as errf:
+                return await super().do_thread(ctx, outf, errf, ticket)
 
 
 @pytest.fixture
@@ -446,6 +468,53 @@ async def test_subproc_capture_stdout_from_terminated_proc(run, verify_output):
         done, {job.name: job.out.encode('ascii') for job in todo}
     )
     assert verify_output([], [])  # subproc terminated before print to stderr
+
+
+# output outside decoration context
+
+
+async def test_output_outside_decoration_from_coro(run, verify_output):
+    todo = [
+        TUndecoratedJob(
+            name,
+            out=[f"This is {name}'s stdout"],  # Use lines instead of chars to
+            err=[f"This is {name}'s stderr"],  # prevent jumbled stdout/stderr.
+        )
+        for name in ['foo', 'bar']
+    ]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo],
+        [job.xerr() for job in todo],
+        [job.xlog() for job in todo],
+    )
+
+
+async def test_output_outside_decoration_from_thread(run, verify_output):
+    todo = [
+        TUndecoratedJob(
+            name,
+            mode='thread',
+            out=[f"This is {name}'s stdout"],  # Use lines instead of chars to
+            err=[f"This is {name}'s stderr"],  # prevent jumbled stdout/stderr.
+        )
+        for name in ['foo', 'bar']
+    ]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo],
+        [job.xerr() for job in todo],
+        [job.xlog() for job in todo],
+    )
+
+
+async def test_output_outside_decoration_from_subprocess(run, verify_output):
+    todo = [TUndecoratedJob(name, mode='mock_argv') for name in ['foo', 'bar']]
+    await run(todo)
+    assert verify_output(
+        [job.xout() for job in todo],
+        [job.xerr(include_log=True) for job in todo],
+    )
 
 
 # decorated_job() decorator

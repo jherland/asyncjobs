@@ -134,9 +134,9 @@ class Context(external_work.Context):
         """
         async with self._use_ticket(ticket, only_reserve=True) as ticket:
             with contextlib.ExitStack() as stack:
-                if stdout is None:
+                if stdout is None and self.stdout is not None:
                     stdout = stack.enter_context(self.stdout)
-                if stderr is None:
+                if stderr is None and self.stderr is not None:
                     stderr = stack.enter_context(self.stderr)
                 async with super().subprocess(
                     argv, stdout=stdout, stderr=stderr, ticket=ticket, **kwargs
