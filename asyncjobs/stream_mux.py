@@ -144,7 +144,8 @@ class StreamMux:
 
         logger.debug(f'Watching {path}')
         assert path not in self.watches
-        f = open(os.open(path, os.O_RDONLY | os.O_NONBLOCK), mode='rb')
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        f = open(fd, mode='rb', buffering=0)
         buffer = bytearray()
         self.watches[path] = f, decorator, buffer
         asyncio.get_running_loop().add_reader(
@@ -152,7 +153,7 @@ class StreamMux:
         )
 
     def _do_read(self, f, decorator, buffer, *, last=False):
-        buffer.extend(f.read())
+        buffer.extend(f.read() or b'')  # .read() may return None w/O_NONBLOCK
         lines = buffer.splitlines(keepends=True)
         if lines and not lines[-1].endswith(b'\n') and not last:
             # keep partial line in buffer
