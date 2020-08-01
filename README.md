@@ -18,30 +18,29 @@ Using asyncio to run jobs in worker threads/processes.
 
 A job scheduler for running asynchronous (and synchronous) jobs with
 dependencies using asyncio. Jobs are _coroutines_ (`async def` functions) with
-a _name_, and (optionally) a set of _dependencies_ (a set of names of other
-jobs that must complete successfully before this job can start). The job
-coroutine may await the results from other jobs, schedule work to be done in a
-thread or subprocess, or various other things provided by the particular
-`Context` object passed to the coroutine. The job coroutines are run by a
-`Scheduler`, which control the execution of the jobs, as well as the number of
-concurrent threads and processes doing work. The Scheduler emits events which
-allow e.g. progress and statistics to be easily collected and monitored.
-A separate module is provided to turn Scheduler events into an interactive
-scheduling plot:
+a _name_, and (optionally) a set of _dependencies_ (i.e. names of other jobs
+that must complete successfully before this job can start). The job coroutine
+may await the results from other jobs, schedule work to be done in a thread or
+subprocess, or various other things provided by the particular `Context` object
+passed to the coroutine. The job coroutines are run by a `Scheduler`, which
+control the execution of the jobs, as well as the number of concurrent threads
+and processes doing work. The Scheduler emits events which allow e.g. progress
+and statistics to be easily collected and monitored. A separate module is
+provided to turn Scheduler events into an interactive scheduling plot:
 
 ![Example schedule plot](
 https://github.com/jherland/asyncjobs/raw/master/examples/random_jobs_plot.png)
 
 A job coroutine completes in one of three ways:
 
- - Jobs complete _successfully_ by returning, and the returned value (if any) is
-   known as the _job result_.
+ - Jobs complete _successfully_ by returning, and the returned value (if any)
+   is known as the _job result_.
  - Jobs are considered to have _failed_ if any exception propagates from its
    coroutine. Any job that depend on (i.e. await the result of) another job
    will be automatically cancelled by the scheduler if that other job fails.
  - Jobs may be _cancelled_, which is implented by the scheduler raising an
    `asyncio.CancelledError` inside the coroutine, and having it propagate out
-   of the corouting.
+   of the coroutine.
 
 The Scheduler handles its own cancellation (e.g. _Ctrl-C_) by cancelling all
 ongoing and remaining tasks as quickly and cleanly as possible.
@@ -169,8 +168,9 @@ Use [`nox`](https://nox.thea.codes/) to run all tests, formatters and linters:
 $ nox
 ```
 
-This will run the test suite under all supported Python versions, format the
-code with [`black`](https://black.readthedocs.io/) and run the
+This will run the [`pytest`](https://pytest.org)-based test suite under all
+supported Python versions, format the code with
+[`black`](https://black.readthedocs.io/) and run the
 [`flake8`](https://flake8.pycqa.org/) linter.
 
 ## Contributing
