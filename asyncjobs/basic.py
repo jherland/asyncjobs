@@ -160,12 +160,6 @@ class Scheduler:
         elif future.cancelled():
             return 'cancelled'
         elif future.exception() is not None:
-            logger.warning(f'FAILED future: {future}:')
-            import traceback
-
-            e = future.exception()
-            lines = traceback.format_exception(type(e), e, None)
-            logger.warning(''.join(lines).rstrip())
             return 'failed'
         else:
             return 'success'
