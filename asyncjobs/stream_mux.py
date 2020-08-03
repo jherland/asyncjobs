@@ -129,19 +129,22 @@ class StreamMux:
         self._watch(fifopath, decorator)
         return fifopath
 
+    def _prepare_decorator(self, decorator=None):
+        if decorator is None:  # => identity decorator
+            return self.default_decorator
+        elif isinstance(decorator, (str, bytes, bytearray)):  # => pattern
+            return self.simple_decorator(decorator)
+        else:
+            assert callable(decorator)
+            return decorator
+
     def _watch(self, path, decorator=None):
         """Add the given 'path' to be watched by StreamMux.
 
         Lines read from 'path' will be passed through 'decorator' before being
         written to this StreamMux' shared output.
         """
-        if decorator is None:  # => identity decorator
-            decorator = self.default_decorator
-        elif isinstance(decorator, (str, bytes, bytearray)):  # => pattern
-            decorator = self.simple_decorator(decorator)
-        else:
-            assert callable(decorator)
-
+        decorator = self._prepare_decorator(decorator)
         logger.debug(f'Watching {path}')
         assert path not in self.watches
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
@@ -152,8 +155,7 @@ class StreamMux:
             f, self._do_read, f, decorator, buffer
         )
 
-    def _do_read(self, f, decorator, buffer, *, last=False):
-        buffer.extend(f.read() or b'')  # .read() may return None w/O_NONBLOCK
+    def _process_lines(self, decorator, buffer, last):
         lines = buffer.splitlines(keepends=True)
         if lines and not lines[-1].endswith(b'\n') and not last:
             # keep partial line in buffer
@@ -163,6 +165,10 @@ class StreamMux:
             buffer.clear()
         for line in lines:
             self.out.write(decorator(line))
+
+    def _do_read(self, f, decorator, buffer, *, last=False):
+        buffer.extend(f.read() or b'')  # .read() may return None w/O_NONBLOCK
+        self._process_lines(decorator, buffer, last)
 
     def unwatch(self, path):
         """Stop watching the given 'path'."""

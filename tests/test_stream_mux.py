@@ -9,7 +9,7 @@ pytestmark = pytest.mark.asyncio
 async def test_no_output(verify_output):
     with StreamMux():
         pass
-    assert verify_output([[]])
+    assert verify_output([])
 
 
 async def test_one_stream_undecorated(verify_output):
