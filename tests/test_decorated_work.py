@@ -302,6 +302,32 @@ async def test_undecorated_follow_file_to_stdout(tmp_path, run, verify_output):
     assert verify_output([lines], [], [])
 
 
+async def test_undecorated_cat_file_to_stdout(tmp_path, run, verify_output):
+    lines = ['first line', 'second line', 'third line', 'fourth line']
+    path = tmp_path / 'file'
+    path.write_text(''.join(line + '\n' for line in lines))
+
+    async def coro(ctx):
+        await ctx.stdout.cat_file(path)
+
+    todo = TJob('foo', coro=coro, decorate=False)
+    await run([todo])
+    assert verify_output([lines], [], [])
+
+
+async def test_undecorated_tail_file_to_stderr(tmp_path, run, verify_output):
+    lines = ['first line', 'second line', 'third line', 'fourth line']
+    path = tmp_path / 'file'
+    path.write_text(''.join(line + '\n' for line in lines))
+
+    async def coro(ctx):
+        await ctx.stderr.cat_file(path, tail=2)
+
+    todo = TJob('foo', coro=coro, decorate=False)
+    await run([todo])
+    assert verify_output([], [lines[-2:]], [])
+
+
 # decorated output
 
 
@@ -415,6 +441,32 @@ async def test_decorated_follow_file_to_stderr(tmp_path, run, verify_output):
     async def coro(ctx):
         with ctx.follow_file(path, use_stderr=True):
             pass
+
+    todo = TJob('foo', coro=coro)
+    await run([todo])
+    assert verify_output([], [[f'foo/ERR: {line}' for line in lines]], [])
+
+
+async def test_decorated_tail_file_to_stdout(tmp_path, run, verify_output):
+    lines = ['first line', 'second line', 'third line', 'fourth line']
+    path = tmp_path / 'file'
+    path.write_text(''.join(line + '\n' for line in lines))
+
+    async def coro(ctx):
+        await ctx.stdout.cat_file(path, tail=2)
+
+    todo = TJob('foo', coro=coro)
+    await run([todo])
+    assert verify_output([[f'foo/out: {line}' for line in lines[-2:]]], [], [])
+
+
+async def test_decorated_cat_file_to_stderr(tmp_path, run, verify_output):
+    lines = ['first line', 'second line', 'third line', 'fourth line']
+    path = tmp_path / 'file'
+    path.write_text(''.join(line + '\n' for line in lines))
+
+    async def coro(ctx):
+        await ctx.stderr.cat_file(path)
 
     todo = TJob('foo', coro=coro)
     await run([todo])

@@ -83,6 +83,14 @@ class DecoratedStream:
             self.mux.unwatch(self.path)
             self.path = None
 
+    async def cat_file(self, path, tail=None):
+        decorator = self.mux._prepare_decorator(self.decorator)
+        lines = path.read_bytes().splitlines(keepends=True)
+        if tail is not None:
+            lines = lines[-tail:]
+        for line in lines:
+            self.mux.out.write(decorator(line))
+
     def __enter__(self):
         return self.open()
 
